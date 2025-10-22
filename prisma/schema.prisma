@@ -82,16 +82,16 @@ model CallcentreOperator {
 
 model Master {
   id          Int      @id @default(autoincrement())
-  cities      String[] @default([])
+  cities      String[]
   name        String
   login       String?  @unique
   password    String?
   passportDoc String?  @map("passport_doc")
   contractDoc String?  @map("contract_doc")
-  statusWork  String?  @map("status_work")
+  statusWork  String   @map("status_work")
   dateCreate  DateTime @default(now()) @map("date_create")
   note        String?
-  tgId        String?  @unique @map("tg_id")
+  tgId        String?  @map("tg_id")
   chatId      String?  @map("chat_id")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
@@ -103,7 +103,7 @@ model Master {
 
 model Director {
   id          Int      @id @default(autoincrement())
-  cities      String[] @default([])
+  cities      String[]
   name        String
   login       String   @unique
   password    String
@@ -111,8 +111,7 @@ model Director {
   passportDoc String?  @map("passport_doc")
   dateCreate  DateTime @default(now()) @map("date_create")
   note        String?
-  tgId        String?  @unique @map("tg_id")
-  chatId      String?  @map("chat_id")
+  tgId        String?  @map("tg_id")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
