@@ -2,10 +2,10 @@ import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 
 export enum UserRole {
-  CALLCENTRE_ADMIN = 'CALLCENTRE_ADMIN',
-  CALLCENTRE_OPERATOR = 'CALLCENTRE_OPERATOR',
-  DIRECTOR = 'DIRECTOR',
-  MASTER = 'MASTER',
+  admin = 'admin',
+  operator = 'operator',
+  director = 'director',
+  master = 'master',
 }
 
 export const Roles = (...roles: UserRole[]) => {

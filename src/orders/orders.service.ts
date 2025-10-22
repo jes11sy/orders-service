@@ -15,17 +15,15 @@ export class OrdersService {
     const where: any = {};
 
     // RBAC фильтры
-    if (user.role === UserRole.MASTER) {
+    if (user.role === 'master') {
       where.masterId = user.userId;
     }
 
-    if (user.role === UserRole.DIRECTOR && user.cities) {
+    if (user.role === 'director' && user.cities) {
       where.city = { in: user.cities };
     }
 
-    if (user.role === UserRole.CALLCENTRE_OPERATOR && user.cities) {
-      where.city = user.cities[0]; // Оператор видит только свой город
-    }
+    // Оператор видит ВСЕ заказы
 
     // Фильтры из query
     if (status) where.statusOrder = status;
@@ -95,7 +93,7 @@ export class OrdersService {
     }
 
     // RBAC проверка
-    if (user.role === UserRole.MASTER && order.masterId !== user.userId) {
+    if (user.role === 'master' && order.masterId !== user.userId) {
       throw new ForbiddenException('Access denied');
     }
 
@@ -107,7 +105,7 @@ export class OrdersService {
     if (!order) throw new NotFoundException();
 
     // RBAC проверка
-    if (user.role === UserRole.MASTER && order.masterId !== user.userId) {
+    if (user.role === 'master' && order.masterId !== user.userId) {
       throw new ForbiddenException();
     }
 
@@ -126,7 +124,7 @@ export class OrdersService {
     const order = await this.prisma.order.findUnique({ where: { id } });
     if (!order) throw new NotFoundException();
 
-    if (user.role === UserRole.MASTER && order.masterId !== user.userId) {
+    if (user.role === 'master' && order.masterId !== user.userId) {
       throw new ForbiddenException();
     }
 

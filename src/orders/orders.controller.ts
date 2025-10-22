@@ -33,7 +33,7 @@ export class OrdersController {
   @Post()
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @ApiBearerAuth()
-  @Roles(UserRole.CALLCENTRE_ADMIN, UserRole.CALLCENTRE_OPERATOR)
+  @Roles(UserRole.operator)
   @ApiOperation({ summary: 'Create new order' })
   async createOrder(@Body() dto: CreateOrderDto, @Request() req) {
     return this.ordersService.createOrder(dto, req.user);
@@ -50,7 +50,8 @@ export class OrdersController {
   @Put(':id')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Update order' })
+  @Roles(UserRole.operator)
+  @ApiOperation({ summary: 'Update order (operator only)' })
   async updateOrder(@Param('id') id: string, @Body() dto: UpdateOrderDto, @Request() req) {
     return this.ordersService.updateOrder(+id, dto, req.user);
   }
@@ -58,6 +59,7 @@ export class OrdersController {
   @Patch(':id/status')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @ApiBearerAuth()
+  @Roles(UserRole.operator, UserRole.director, UserRole.master)
   @ApiOperation({ summary: 'Update order status' })
   async updateStatus(@Param('id') id: string, @Body('status') status: string, @Request() req) {
     return this.ordersService.updateStatus(+id, status, req.user);
@@ -66,7 +68,7 @@ export class OrdersController {
   @Patch(':id/master')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @ApiBearerAuth()
-  @Roles(UserRole.DIRECTOR, UserRole.CALLCENTRE_ADMIN)
+  @Roles(UserRole.operator, UserRole.director)
   @ApiOperation({ summary: 'Assign master to order' })
   async assignMaster(@Param('id') id: string, @Body('masterId') masterId: number) {
     return this.ordersService.assignMaster(+id, masterId);
@@ -75,7 +77,7 @@ export class OrdersController {
   @Patch(':id/approve')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @ApiBearerAuth()
-  @Roles(UserRole.DIRECTOR)
+  @Roles(UserRole.director)
   @ApiOperation({ summary: 'Approve order finances' })
   async approveFinances(@Param('id') id: string, @Request() req) {
     return this.ordersService.approveFinances(+id, req.user.userId);
