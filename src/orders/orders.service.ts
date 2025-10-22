@@ -53,12 +53,14 @@ export class OrdersService {
 
     return {
       success: true,
-      data,
-      pagination: {
-        page: +page,
-        limit: +limit,
-        total,
-        totalPages: Math.ceil(total / limit),
+      data: {
+        orders: data,
+        pagination: {
+          page: +page,
+          limit: +limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
       },
     };
   }
