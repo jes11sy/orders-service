@@ -3,6 +3,7 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { CreateOrderFromCallDto } from './dto/create-order-from-call.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { RolesGuard, Roles, UserRole } from '../auth/roles.guard';
 
@@ -37,6 +38,15 @@ export class OrdersController {
   @ApiOperation({ summary: 'Create new order' })
   async createOrder(@Body() dto: CreateOrderDto, @Request() req) {
     return this.ordersService.createOrder(dto, req.user);
+  }
+
+  @Post('from-call')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @ApiBearerAuth()
+  @Roles(UserRole.operator)
+  @ApiOperation({ summary: 'Create order from call' })
+  async createOrderFromCall(@Body() dto: CreateOrderFromCallDto, @Request() req) {
+    return this.ordersService.createOrderFromCall(dto, req.user);
   }
 
   @Get(':id')

@@ -1,6 +1,7 @@
 import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { CreateOrderFromCallDto } from './dto/create-order-from-call.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { UserRole } from '../auth/roles.guard';
 
@@ -71,6 +72,48 @@ export class OrdersService {
         ...dto,
         createDate: new Date(),
         dateMeeting: new Date(dto.dateMeeting),
+      },
+      include: {
+        operator: true,
+        master: true,
+      },
+    });
+
+    return { success: true, data: order };
+  }
+
+  async createOrderFromCall(dto: CreateOrderFromCallDto, user: any) {
+    // Получаем информацию о звонке
+    const call = await this.prisma.call.findUnique({
+      where: { id: dto.callId },
+      select: {
+        id: true,
+        phoneClient: true,
+        operatorId: true,
+        callId: true,
+      },
+    });
+
+    if (!call) {
+      throw new NotFoundException('Call not found');
+    }
+
+    const order = await this.prisma.order.create({
+      data: {
+        rk: dto.rk,
+        city: dto.city,
+        avitoName: dto.avitoName,
+        phone: call.phoneClient,
+        typeOrder: dto.typeOrder,
+        clientName: dto.clientName,
+        address: dto.address,
+        dateMeeting: new Date(dto.dateMeeting),
+        typeEquipment: dto.typeEquipment,
+        problem: dto.problem,
+        statusOrder: 'Новый',
+        operatorNameId: call.operatorId,
+        callId: call.callId,
+        createDate: new Date(),
       },
       include: {
         operator: true,

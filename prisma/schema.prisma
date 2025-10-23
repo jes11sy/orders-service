@@ -118,3 +118,28 @@ model Director {
   @@map("director")
 }
 
+model Call {
+  id           Int      @id @default(autoincrement())
+  rk           String
+  city         String
+  avitoName    String?  @map("avito_name")
+  phoneClient  String   @map("phone_client")
+  phoneAts     String   @map("phone_ats")
+  dateCreate   DateTime @map("date_create")
+  operatorId   Int      @map("operator_id")
+  status       String
+  callId       String?  @unique @map("call_id")
+  duration     Int?
+  recordUrl    String?  @map("record_url")
+  recordingPath String? @map("recording_path")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("calls")
+  @@index([city])
+  @@index([dateCreate])
+  @@index([operatorId])
+  @@index([phoneClient])
+  @@index([callId])
+}
+
