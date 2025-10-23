@@ -83,27 +83,37 @@ export class OrdersService {
   }
 
   async createOrderFromCall(dto: CreateOrderFromCallDto, user: any) {
-    // Получаем информацию о звонке
-    const call = await this.prisma.call.findUnique({
-      where: { id: dto.callId },
+    // Получаем информацию о всех звонках из группы
+    const calls = await this.prisma.call.findMany({
+      where: { id: { in: dto.callIds } },
       select: {
         id: true,
         phoneClient: true,
         operatorId: true,
         callId: true,
       },
+      orderBy: { dateCreate: 'desc' },
     });
 
-    if (!call) {
-      throw new NotFoundException('Call not found');
+    if (!calls || calls.length === 0) {
+      throw new NotFoundException('Calls not found');
     }
+
+    // Берем последний звонок как основной
+    const mainCall = calls[0];
+
+    // Собираем все callId в строку через запятую
+    const allCallIds = calls
+      .map(c => c.callId)
+      .filter(Boolean)
+      .join(', ');
 
     const order = await this.prisma.order.create({
       data: {
         rk: dto.rk,
         city: dto.city,
         avitoName: dto.avitoName,
-        phone: call.phoneClient,
+        phone: mainCall.phoneClient,
         typeOrder: dto.typeOrder,
         clientName: dto.clientName,
         address: dto.address,
@@ -111,8 +121,8 @@ export class OrdersService {
         typeEquipment: dto.typeEquipment,
         problem: dto.problem,
         statusOrder: 'Новый',
-        operatorNameId: call.operatorId,
-        callId: call.callId,
+        operatorNameId: mainCall.operatorId,
+        callId: allCallIds,
         createDate: new Date(),
       },
       include: {

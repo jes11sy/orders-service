@@ -1,8 +1,8 @@
-import { IsString, IsNotEmpty, IsOptional, IsNumber } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsArray, IsNumber } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateOrderFromCallDto {
-  @ApiProperty() @IsNumber() @IsNotEmpty() callId: number;
+  @ApiProperty({ type: [Number] }) @IsArray() @IsNotEmpty() callIds: number[];
   @ApiProperty() @IsString() @IsNotEmpty() rk: string;
   @ApiProperty() @IsString() @IsNotEmpty() city: string;
   @ApiProperty({ required: false }) @IsString() @IsOptional() avitoName?: string;
