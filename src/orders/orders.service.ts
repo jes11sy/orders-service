@@ -102,10 +102,9 @@ export class OrdersService {
     // Берем последний звонок как основной
     const mainCall = calls[0];
 
-    // Собираем все callId в строку через запятую
+    // Собираем все ID звонков в строку через запятую (ID из таблицы calls)
     const allCallIds = calls
-      .map(c => c.callId)
-      .filter(Boolean)
+      .map(c => c.id)
       .join(', ');
 
     const order = await this.prisma.order.create({
