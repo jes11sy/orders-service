@@ -105,7 +105,7 @@ export class OrdersService {
     // Собираем все ID звонков в строку через запятую (ID из таблицы calls)
     const allCallIds = calls
       .map(c => c.id)
-      .join(', ');
+      .join(',');
 
     const order = await this.prisma.order.create({
       data: {
