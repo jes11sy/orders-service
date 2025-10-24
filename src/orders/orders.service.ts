@@ -198,6 +198,8 @@ export class OrdersService {
   }
 
   async updateOrder(id: number, dto: UpdateOrderDto, user: any) {
+    console.log('Updating order:', id, 'with data:', JSON.stringify(dto));
+    
     const order = await this.prisma.order.findUnique({ where: { id } });
     if (!order) throw new NotFoundException();
 
@@ -206,15 +208,42 @@ export class OrdersService {
       throw new ForbiddenException();
     }
 
+    // Создаем объект обновления, включая null значения
+    const updateData: any = {};
+    
+    // Обрабатываем каждое поле отдельно
+    if (dto.statusOrder !== undefined) updateData.statusOrder = dto.statusOrder;
+    if (dto.masterId !== undefined) updateData.masterId = dto.masterId;
+    if (dto.result !== undefined) updateData.result = dto.result;
+    if (dto.expenditure !== undefined) updateData.expenditure = dto.expenditure;
+    if (dto.clean !== undefined) updateData.clean = dto.clean;
+    if (dto.masterChange !== undefined) updateData.masterChange = dto.masterChange;
+    if (dto.bsoDoc !== undefined) updateData.bsoDoc = dto.bsoDoc;
+    if (dto.expenditureDoc !== undefined) updateData.expenditureDoc = dto.expenditureDoc;
+    if (dto.prepayment !== undefined) updateData.prepayment = dto.prepayment;
+    if (dto.comment !== undefined) updateData.comment = dto.comment;
+    if (dto.cashSubmissionStatus !== undefined) updateData.cashSubmissionStatus = dto.cashSubmissionStatus;
+    if (dto.cashSubmissionAmount !== undefined) updateData.cashSubmissionAmount = dto.cashSubmissionAmount;
+    if (dto.cashReceiptDoc !== undefined) updateData.cashReceiptDoc = dto.cashReceiptDoc;
+    
+    // Обрабатываем дату отдельно
+    if (dto.closingData !== undefined) {
+      updateData.closingData = dto.closingData ? new Date(dto.closingData) : null;
+    }
+
+    console.log('Filtered update data:', JSON.stringify(updateData));
+
     const updated = await this.prisma.order.update({
       where: { id },
-      data: {
-        ...dto,
-        closingData: dto.closingData ? new Date(dto.closingData) : undefined,
-      },
+      data: updateData,
     });
 
-    return { success: true, data: updated };
+    console.log('Order updated successfully:', updated.id);
+    return { 
+      success: true, 
+      data: updated,
+      message: `Заказ №${updated.id} обновлен!`
+    };
   }
 
   async updateStatus(id: number, status: string, user: any) {
