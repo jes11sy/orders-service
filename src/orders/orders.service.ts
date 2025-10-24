@@ -198,10 +198,15 @@ export class OrdersService {
   }
 
   async updateOrder(id: number, dto: UpdateOrderDto, user: any) {
-    console.log('Updating order:', id, 'with data:', JSON.stringify(dto));
+    console.log('=== UPDATE ORDER DEBUG ===');
+    console.log('Order ID:', id);
+    console.log('DTO received:', JSON.stringify(dto, null, 2));
+    console.log('User:', JSON.stringify(user, null, 2));
     
     const order = await this.prisma.order.findUnique({ where: { id } });
     if (!order) throw new NotFoundException();
+
+    console.log('Current order data:', JSON.stringify(order, null, 2));
 
     // RBAC проверка
     if (user.role === 'master' && order.masterId !== user.userId) {
@@ -211,34 +216,144 @@ export class OrdersService {
     // Создаем объект обновления, включая null значения
     const updateData: any = {};
     
-    // Обрабатываем каждое поле отдельно
-    if (dto.statusOrder !== undefined) updateData.statusOrder = dto.statusOrder;
-    if (dto.masterId !== undefined) updateData.masterId = dto.masterId;
-    if (dto.result !== undefined) updateData.result = dto.result;
-    if (dto.expenditure !== undefined) updateData.expenditure = dto.expenditure;
-    if (dto.clean !== undefined) updateData.clean = dto.clean;
-    if (dto.masterChange !== undefined) updateData.masterChange = dto.masterChange;
-    if (dto.bsoDoc !== undefined) updateData.bsoDoc = dto.bsoDoc;
-    if (dto.expenditureDoc !== undefined) updateData.expenditureDoc = dto.expenditureDoc;
-    if (dto.prepayment !== undefined) updateData.prepayment = dto.prepayment;
-    if (dto.comment !== undefined) updateData.comment = dto.comment;
-    if (dto.cashSubmissionStatus !== undefined) updateData.cashSubmissionStatus = dto.cashSubmissionStatus;
-    if (dto.cashSubmissionAmount !== undefined) updateData.cashSubmissionAmount = dto.cashSubmissionAmount;
-    if (dto.cashReceiptDoc !== undefined) updateData.cashReceiptDoc = dto.cashReceiptDoc;
+    // Обрабатываем каждое поле отдельно с детальным логированием
+    console.log('Processing fields:');
     
-    // Обрабатываем дату отдельно
-    if (dto.closingData !== undefined) {
+    // Основные поля заказа
+    if (dto.rk !== undefined && dto.rk !== null) {
+      updateData.rk = dto.rk;
+      console.log('✓ rk:', dto.rk);
+    }
+    if (dto.city !== undefined && dto.city !== null) {
+      updateData.city = dto.city;
+      console.log('✓ city:', dto.city);
+    }
+    if (dto.avitoName !== undefined && dto.avitoName !== null) {
+      updateData.avitoName = dto.avitoName;
+      console.log('✓ avitoName:', dto.avitoName);
+    }
+    if (dto.phone !== undefined && dto.phone !== null) {
+      updateData.phone = dto.phone;
+      console.log('✓ phone:', dto.phone);
+    }
+    if (dto.typeOrder !== undefined && dto.typeOrder !== null) {
+      updateData.typeOrder = dto.typeOrder;
+      console.log('✓ typeOrder:', dto.typeOrder);
+    }
+    if (dto.clientName !== undefined && dto.clientName !== null) {
+      updateData.clientName = dto.clientName;
+      console.log('✓ clientName:', dto.clientName);
+    }
+    if (dto.address !== undefined && dto.address !== null) {
+      updateData.address = dto.address;
+      console.log('✓ address:', dto.address);
+    }
+    if (dto.typeEquipment !== undefined && dto.typeEquipment !== null) {
+      updateData.typeEquipment = dto.typeEquipment;
+      console.log('✓ typeEquipment:', dto.typeEquipment);
+    }
+    if (dto.problem !== undefined && dto.problem !== null) {
+      updateData.problem = dto.problem;
+      console.log('✓ problem:', dto.problem);
+    }
+    if (dto.avitoChatId !== undefined && dto.avitoChatId !== null) {
+      updateData.avitoChatId = dto.avitoChatId;
+      console.log('✓ avitoChatId:', dto.avitoChatId);
+    }
+    if (dto.callId !== undefined && dto.callId !== null) {
+      updateData.callId = dto.callId;
+      console.log('✓ callId:', dto.callId);
+    }
+    if (dto.operatorNameId !== undefined && dto.operatorNameId !== null) {
+      updateData.operatorNameId = dto.operatorNameId;
+      console.log('✓ operatorNameId:', dto.operatorNameId);
+    }
+    
+    // Поля статуса и мастера
+    if (dto.statusOrder !== undefined && dto.statusOrder !== null) {
+      updateData.statusOrder = dto.statusOrder;
+      console.log('✓ statusOrder:', dto.statusOrder);
+    }
+    if (dto.masterId !== undefined && dto.masterId !== null) {
+      updateData.masterId = dto.masterId;
+      console.log('✓ masterId:', dto.masterId);
+    }
+    
+    // Финансовые поля
+    if (dto.result !== undefined && dto.result !== null) {
+      updateData.result = dto.result;
+      console.log('✓ result:', dto.result);
+    }
+    if (dto.expenditure !== undefined && dto.expenditure !== null) {
+      updateData.expenditure = dto.expenditure;
+      console.log('✓ expenditure:', dto.expenditure);
+    }
+    if (dto.clean !== undefined && dto.clean !== null) {
+      updateData.clean = dto.clean;
+      console.log('✓ clean:', dto.clean);
+    }
+    if (dto.masterChange !== undefined && dto.masterChange !== null) {
+      updateData.masterChange = dto.masterChange;
+      console.log('✓ masterChange:', dto.masterChange);
+    }
+    if (dto.prepayment !== undefined && dto.prepayment !== null) {
+      updateData.prepayment = dto.prepayment;
+      console.log('✓ prepayment:', dto.prepayment);
+    }
+    
+    // Документы
+    if (dto.bsoDoc !== undefined && dto.bsoDoc !== null) {
+      updateData.bsoDoc = dto.bsoDoc;
+      console.log('✓ bsoDoc:', dto.bsoDoc);
+    }
+    if (dto.expenditureDoc !== undefined && dto.expenditureDoc !== null) {
+      updateData.expenditureDoc = dto.expenditureDoc;
+      console.log('✓ expenditureDoc:', dto.expenditureDoc);
+    }
+    if (dto.cashReceiptDoc !== undefined && dto.cashReceiptDoc !== null) {
+      updateData.cashReceiptDoc = dto.cashReceiptDoc;
+      console.log('✓ cashReceiptDoc:', dto.cashReceiptDoc);
+    }
+    
+    // Дополнительные поля
+    if (dto.comment !== undefined && dto.comment !== null) {
+      updateData.comment = dto.comment;
+      console.log('✓ comment:', dto.comment);
+    }
+    if (dto.cashSubmissionStatus !== undefined && dto.cashSubmissionStatus !== null) {
+      updateData.cashSubmissionStatus = dto.cashSubmissionStatus;
+      console.log('✓ cashSubmissionStatus:', dto.cashSubmissionStatus);
+    }
+    if (dto.cashSubmissionAmount !== undefined && dto.cashSubmissionAmount !== null) {
+      updateData.cashSubmissionAmount = dto.cashSubmissionAmount;
+      console.log('✓ cashSubmissionAmount:', dto.cashSubmissionAmount);
+    }
+    
+    // Обрабатываем даты отдельно
+    if (dto.dateMeeting !== undefined && dto.dateMeeting !== null) {
+      updateData.dateMeeting = dto.dateMeeting ? new Date(dto.dateMeeting) : null;
+      console.log('✓ dateMeeting:', dto.dateMeeting, '->', updateData.dateMeeting);
+    }
+    if (dto.closingData !== undefined && dto.closingData !== null) {
       updateData.closingData = dto.closingData ? new Date(dto.closingData) : null;
+      console.log('✓ closingData:', dto.closingData, '->', updateData.closingData);
     }
 
-    console.log('Filtered update data:', JSON.stringify(updateData));
+    console.log('Final update data:', JSON.stringify(updateData, null, 2));
 
     const updated = await this.prisma.order.update({
       where: { id },
       data: updateData,
+      include: {
+        operator: { select: { id: true, name: true, login: true } },
+        master: { select: { id: true, name: true } },
+      },
     });
 
     console.log('Order updated successfully:', updated.id);
+    console.log('Updated order data:', JSON.stringify(updated, null, 2));
+    console.log('=== END UPDATE DEBUG ===');
+    
     return { 
       success: true, 
       data: updated,
