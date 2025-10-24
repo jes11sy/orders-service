@@ -149,7 +149,7 @@ export class OrdersService {
         typeEquipment: dto.typeEquipment,
         problem: dto.problem,
         callRecord: dto.callRecord,
-        statusOrder: dto.statusOrder,
+        statusOrder: dto.statusOrder || 'Ожидает',
         operatorNameId: dto.operatorNameId,
         avitoChatId: dto.avitoChatId,
         comment: dto.comment,

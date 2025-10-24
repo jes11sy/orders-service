@@ -66,7 +66,15 @@ export class OrdersController {
   @Roles(UserRole.operator)
   @ApiOperation({ summary: 'Create order from chat' })
   async createOrderFromChat(@Body() dto: CreateOrderFromChatDto, @Request() req) {
-    return this.ordersService.createOrderFromChat(dto, req.user);
+    this.logger.log('Creating order from chat with data:', JSON.stringify(dto));
+    try {
+      const result = await this.ordersService.createOrderFromChat(dto, req.user);
+      this.logger.log('Order from chat created successfully:', result.data.id);
+      return result;
+    } catch (error) {
+      this.logger.error('Error creating order from chat:', error.message);
+      throw new BadRequestException(`Failed to create order from chat: ${error.message}`);
+    }
   }
 
   @Get(':id')
