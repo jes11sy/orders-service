@@ -1,15 +1,18 @@
-import { Controller, Get, Post, Put, Patch, Body, Param, Query, UseGuards, Request, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Body, Param, Query, UseGuards, Request, HttpCode, HttpStatus, Logger, BadRequestException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { CreateOrderFromCallDto } from './dto/create-order-from-call.dto';
+import { CreateOrderFromChatDto } from './dto/create-order-from-chat.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { RolesGuard, Roles, UserRole } from '../auth/roles.guard';
 
 @ApiTags('orders')
 @Controller('orders')
 export class OrdersController {
+  private readonly logger = new Logger(OrdersController.name);
+
   constructor(private ordersService: OrdersService) {}
 
   @Get('health')
@@ -37,7 +40,15 @@ export class OrdersController {
   @Roles(UserRole.operator)
   @ApiOperation({ summary: 'Create new order' })
   async createOrder(@Body() dto: CreateOrderDto, @Request() req) {
-    return this.ordersService.createOrder(dto, req.user);
+    this.logger.log('Creating order with data:', JSON.stringify(dto));
+    try {
+      const result = await this.ordersService.createOrder(dto, req.user);
+      this.logger.log('Order created successfully:', result.data.id);
+      return result;
+    } catch (error) {
+      this.logger.error('Error creating order:', error.message);
+      throw new BadRequestException(`Failed to create order: ${error.message}`);
+    }
   }
 
   @Post('from-call')
@@ -47,6 +58,15 @@ export class OrdersController {
   @ApiOperation({ summary: 'Create order from call' })
   async createOrderFromCall(@Body() dto: CreateOrderFromCallDto, @Request() req) {
     return this.ordersService.createOrderFromCall(dto, req.user);
+  }
+
+  @Post('from-chat')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @ApiBearerAuth()
+  @Roles(UserRole.operator)
+  @ApiOperation({ summary: 'Create order from chat' })
+  async createOrderFromChat(@Body() dto: CreateOrderFromChatDto, @Request() req) {
+    return this.ordersService.createOrderFromChat(dto, req.user);
   }
 
   @Get(':id')

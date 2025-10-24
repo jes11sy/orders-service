@@ -2,6 +2,7 @@ import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/commo
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { CreateOrderFromCallDto } from './dto/create-order-from-call.dto';
+import { CreateOrderFromChatDto } from './dto/create-order-from-chat.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { UserRole } from '../auth/roles.guard';
 
@@ -70,6 +71,7 @@ export class OrdersService {
     const order = await this.prisma.order.create({
       data: {
         ...dto,
+        statusOrder: dto.statusOrder || 'Ожидает',
         createDate: new Date(),
         dateMeeting: new Date(dto.dateMeeting),
       },
@@ -122,6 +124,35 @@ export class OrdersService {
         statusOrder: 'Новый',
         operatorNameId: mainCall.operatorId,
         callId: allCallIds,
+        createDate: new Date(),
+      },
+      include: {
+        operator: true,
+        master: true,
+      },
+    });
+
+    return { success: true, data: order };
+  }
+
+  async createOrderFromChat(dto: CreateOrderFromChatDto, user: any) {
+    const order = await this.prisma.order.create({
+      data: {
+        rk: dto.rk,
+        city: dto.city,
+        avitoName: dto.avitoName,
+        phone: dto.phone,
+        typeOrder: dto.typeOrder,
+        clientName: dto.clientName,
+        address: dto.address,
+        dateMeeting: new Date(dto.dateMeeting),
+        typeEquipment: dto.typeEquipment,
+        problem: dto.problem,
+        callRecord: dto.callRecord,
+        statusOrder: dto.statusOrder,
+        operatorNameId: dto.operatorNameId,
+        avitoChatId: dto.avitoChatId,
+        comment: dto.comment,
         createDate: new Date(),
       },
       include: {
