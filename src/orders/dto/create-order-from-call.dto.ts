@@ -1,4 +1,5 @@
 import { IsString, IsNotEmpty, IsOptional, IsArray, IsNumber } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateOrderFromCallDto {
@@ -12,5 +13,6 @@ export class CreateOrderFromCallDto {
   @ApiProperty() @IsString() @IsNotEmpty() dateMeeting: string;
   @ApiProperty() @IsString() @IsNotEmpty() typeEquipment: string;
   @ApiProperty() @IsString() @IsNotEmpty() problem: string;
+  @ApiProperty() @IsNumber() @IsNotEmpty() @Transform(({ value }) => parseInt(value)) operatorNameId: number;
 }
 
