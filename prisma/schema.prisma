@@ -39,12 +39,10 @@ model Order {
   dateClosmod    DateTime? @map("date_closmod")
   comment        String?
   
-  cashSubmissionStatus String?   @default("Готово") @map("cash_submission_status")
+  cashSubmissionStatus String?   @map("cash_submission_status")
   cashSubmissionDate   DateTime? @map("cash_submission_date")
   cashSubmissionAmount Decimal?  @map("cash_submission_amount") @db.Decimal(10, 2)
   cashReceiptDoc       String?   @map("cash_receipt_doc")
-  cashApprovedBy       Int?      @map("cash_approved_by")
-  cashApprovedDate     DateTime? @map("cash_approved_date")
 
   operator CallcentreOperator @relation(fields: [operatorNameId], references: [id])
   master   Master?             @relation(fields: [masterId], references: [id])

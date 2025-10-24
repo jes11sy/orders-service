@@ -242,17 +242,5 @@ export class OrdersService {
     return { success: true, data: updated };
   }
 
-  async approveFinances(id: number, directorId: number) {
-    const updated = await this.prisma.order.update({
-      where: { id },
-      data: {
-        cashApprovedBy: directorId,
-        cashApprovedDate: new Date(),
-        cashSubmissionStatus: 'Утверждено',
-      },
-    });
-
-    return { success: true, data: updated };
-  }
 }
 

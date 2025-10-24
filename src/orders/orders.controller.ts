@@ -112,13 +112,5 @@ export class OrdersController {
     return this.ordersService.assignMaster(+id, masterId);
   }
 
-  @Patch(':id/approve')
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @ApiBearerAuth()
-  @Roles(UserRole.director)
-  @ApiOperation({ summary: 'Approve order finances' })
-  async approveFinances(@Param('id') id: string, @Request() req) {
-    return this.ordersService.approveFinances(+id, req.user.userId);
-  }
 }
 
