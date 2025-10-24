@@ -81,7 +81,11 @@ export class OrdersService {
       },
     });
 
-    return { success: true, data: order };
+    return { 
+      success: true, 
+      data: order,
+      message: `Заказ №${order.id} успешно создан!`
+    };
   }
 
   async createOrderFromCall(dto: CreateOrderFromCallDto, user: any) {
@@ -132,7 +136,11 @@ export class OrdersService {
       },
     });
 
-    return { success: true, data: order };
+    return { 
+      success: true, 
+      data: order,
+      message: `Заказ №${order.id} успешно создан!`
+    };
   }
 
   async createOrderFromChat(dto: CreateOrderFromChatDto, user: any) {
@@ -161,7 +169,11 @@ export class OrdersService {
       },
     });
 
-    return { success: true, data: order };
+    return { 
+      success: true, 
+      data: order,
+      message: `Заказ №${order.id} успешно создан!`
+    };
   }
 
   async getOrder(id: number, user: any) {
