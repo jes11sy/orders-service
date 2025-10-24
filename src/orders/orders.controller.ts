@@ -112,5 +112,25 @@ export class OrdersController {
     return this.ordersService.assignMaster(+id, masterId);
   }
 
+  @Get('statuses')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get available order statuses' })
+  async getOrderStatuses() {
+    return {
+      success: true,
+      data: [
+        'Ожидает',
+        'Принял', 
+        'В пути',
+        'В работе',
+        'Готово',
+        'Отказ',
+        'Модерн',
+        'Незаказ'
+      ]
+    };
+  }
+
 }
 
