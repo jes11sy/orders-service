@@ -39,19 +39,66 @@ export class OrdersService {
       ];
     }
 
-    const [data, total] = await Promise.all([
-      this.prisma.order.findMany({
-        where,
-        skip,
-        take: +limit,
-        orderBy: { createDate: 'desc' },
-        include: {
-          operator: { select: { id: true, name: true, login: true } },
-          master: { select: { id: true, name: true } },
-        },
-      }),
-      this.prisma.order.count({ where }),
-    ]);
+    // Определяем порядок сортировки в зависимости от статуса
+    let orderBy: any = { createDate: 'desc' };
+    
+    // Получаем все заказы для кастомной сортировки
+    const allOrders = await this.prisma.order.findMany({
+      where,
+      include: {
+        operator: { select: { id: true, name: true, login: true } },
+        master: { select: { id: true, name: true } },
+      },
+    });
+
+    // Сортируем заказы по приоритету:
+    // 1. Ожидает - по дате встречи (ближайшие первыми)
+    // 2. Принял - по дате встречи
+    // 3. В пути - по дате встречи
+    // 4. В работе - по дате встречи
+    // 5. Модерн
+    // 6. Готово, Отказ, Незаказ - по дате закрытия
+    const sortedOrders = allOrders.sort((a, b) => {
+      const getStatusPriority = (status: string) => {
+        switch (status) {
+          case 'Ожидает': return 1;
+          case 'Принял': return 2;
+          case 'В пути': return 3;
+          case 'В работе': return 4;
+          case 'Модерн': return 5;
+          case 'Готово':
+          case 'Отказ':
+          case 'Незаказ': return 6;
+          default: return 7;
+        }
+      };
+
+      const priorityA = getStatusPriority(a.statusOrder);
+      const priorityB = getStatusPriority(b.statusOrder);
+
+      if (priorityA !== priorityB) {
+        return priorityA - priorityB;
+      }
+
+      // Для одинакового приоритета сортируем по дате
+      if (priorityA <= 4) {
+        // Для статусов с датой встречи
+        const dateA = a.dateMeeting ? new Date(a.dateMeeting).getTime() : 0;
+        const dateB = b.dateMeeting ? new Date(b.dateMeeting).getTime() : 0;
+        return dateA - dateB; // Ближайшие первыми
+      } else if (priorityA === 6) {
+        // Для Готово, Отказ, Незаказ - по дате закрытия (closingData)
+        const dateA = a.closingData ? new Date(a.closingData).getTime() : (a.dateCreate ? new Date(a.dateCreate).getTime() : 0);
+        const dateB = b.closingData ? new Date(b.closingData).getTime() : (b.dateCreate ? new Date(b.dateCreate).getTime() : 0);
+        return dateB - dateA; // Последние первыми
+      }
+
+      return 0;
+    });
+
+    // Применяем пагинацию
+    const data = sortedOrders.slice(skip, skip + +limit);
+    const total = allOrders.length;
 
     return {
       success: true,
