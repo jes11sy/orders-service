@@ -39,10 +39,7 @@ export class OrdersService {
       ];
     }
 
-    // Определяем порядок сортировки в зависимости от статуса
-    let orderBy: any = { createDate: 'desc' };
-    
-    // Получаем все заказы для кастомной сортировки
+    // Получаем все заказы без пагинации для сортировки
     const allOrders = await this.prisma.order.findMany({
       where,
       include: {
@@ -51,54 +48,12 @@ export class OrdersService {
       },
     });
 
-    // Сортируем заказы по приоритету:
-    // 1. Ожидает - по дате встречи (ближайшие первыми)
-    // 2. Принял - по дате встречи
-    // 3. В пути - по дате встречи
-    // 4. В работе - по дате встречи
-    // 5. Модерн
-    // 6. Готово, Отказ, Незаказ - по дате закрытия
-    const sortedOrders = allOrders.sort((a, b) => {
-      const getStatusPriority = (status: string) => {
-        switch (status) {
-          case 'Ожидает': return 1;
-          case 'Принял': return 2;
-          case 'В пути': return 3;
-          case 'В работе': return 4;
-          case 'Модерн': return 5;
-          case 'Готово':
-          case 'Отказ':
-          case 'Незаказ': return 6;
-          default: return 7;
-        }
-      };
-
-      const priorityA = getStatusPriority(a.statusOrder);
-      const priorityB = getStatusPriority(b.statusOrder);
-
-      if (priorityA !== priorityB) {
-        return priorityA - priorityB;
-      }
-
-      // Для одинакового приоритета сортируем по дате
-      if (priorityA <= 4) {
-        // Для статусов с датой встречи
-        const dateA = a.dateMeeting ? new Date(a.dateMeeting).getTime() : 0;
-        const dateB = b.dateMeeting ? new Date(b.dateMeeting).getTime() : 0;
-        return dateA - dateB; // Ближайшие первыми
-      } else if (priorityA === 6) {
-        // Для Готово, Отказ, Незаказ - по дате закрытия (closingData)
-        const dateA = a.closingData ? new Date(a.closingData).getTime() : (a.dateCreate ? new Date(a.dateCreate).getTime() : 0);
-        const dateB = b.closingData ? new Date(b.closingData).getTime() : (b.dateCreate ? new Date(b.dateCreate).getTime() : 0);
-        return dateB - dateA; // Последние первыми
-      }
-
-      return 0;
-    });
-
-    // Применяем пагинацию
+    // Сортируем заказы согласно требованиям
+    const sortedOrders = this.sortOrders(allOrders);
+    
+    // Применяем пагинацию к отсортированным данным
     const data = sortedOrders.slice(skip, skip + +limit);
-    const total = allOrders.length;
+    const total = sortedOrders.length;
 
     return {
       success: true,
@@ -431,6 +386,46 @@ export class OrdersService {
     });
 
     return { success: true, data: updated };
+  }
+
+  private sortOrders(orders: any[]) {
+    return orders.sort((a, b) => {
+      // Определяем приоритет статусов
+      const getStatusPriority = (status: string): number => {
+        switch (status) {
+          case 'Ожидает': return 1
+          case 'Принял': return 2
+          case 'В пути': return 3
+          case 'В работе': return 4
+          case 'Модерн': return 5
+          case 'Готово': return 6
+          case 'Отказ': return 7
+          case 'Незаказ': return 8
+          default: return 9
+        }
+      }
+
+      const priorityA = getStatusPriority(a.statusOrder)
+      const priorityB = getStatusPriority(b.statusOrder)
+
+      // Сначала сортируем по приоритету статуса
+      if (priorityA !== priorityB) {
+        return priorityA - priorityB
+      }
+
+      // Если статусы одинаковые, сортируем по дате
+      if (priorityA <= 5) {
+        // Для статусов "Ожидает", "Принял", "В пути", "В работе", "Модерн" - по дате встречи
+        const dateA = new Date(a.dateMeeting).getTime()
+        const dateB = new Date(b.dateMeeting).getTime()
+        return dateA - dateB // Ближайшая дата встреча идет первой
+      } else {
+        // Для статусов "Готово", "Отказ", "Незаказ" - по дате закрытия
+        const dateA = new Date(a.closingData || a.dateClosmod || 0).getTime()
+        const dateB = new Date(b.closingData || b.dateClosmod || 0).getTime()
+        return dateB - dateA // Более поздняя дата закрытия идет первой
+      }
+    })
   }
 
 }
