@@ -273,6 +273,12 @@ export class OrdersService {
     if (dto.statusOrder !== undefined && dto.statusOrder !== null) {
       updateData.statusOrder = dto.statusOrder;
       console.log('✓ statusOrder:', dto.statusOrder);
+      // Если статус терминальный и closingData не передан явно, выставляем текущую дату закрытия
+      const terminalStatuses = ['Готово', 'Отказ', 'Незаказ'];
+      if (terminalStatuses.includes(dto.statusOrder) && dto.closingData === undefined) {
+        updateData.closingData = new Date();
+        console.log('✓ closingData (auto):', updateData.closingData);
+      }
     }
     if (dto.masterId !== undefined && dto.masterId !== null) {
       updateData.masterId = dto.masterId;
@@ -369,9 +375,15 @@ export class OrdersService {
       throw new ForbiddenException();
     }
 
+    const terminalStatuses = ['Готово', 'Отказ', 'Незаказ'];
+    const data: any = { statusOrder: status };
+    if (terminalStatuses.includes(status)) {
+      data.closingData = new Date();
+    }
+
     const updated = await this.prisma.order.update({
       where: { id },
-      data: { statusOrder: status },
+      data,
     });
 
     return { success: true, data: updated };
