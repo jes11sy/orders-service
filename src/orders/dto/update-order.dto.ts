@@ -35,6 +35,7 @@ export class UpdateOrderDto {
   
   // Даты
   @ApiProperty({ required: false }) @IsDateString() @IsOptional() closingData?: string;
+  @ApiProperty({ required: false }) @IsDateString() @IsOptional() dateClosmod?: string;
   
   // Дополнительные поля
   @ApiProperty({ required: false }) @IsString() @IsOptional() comment?: string;

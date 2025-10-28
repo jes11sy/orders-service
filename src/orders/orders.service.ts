@@ -351,6 +351,10 @@ export class OrdersService {
       updateData.closingData = dto.closingData ? new Date(dto.closingData) : null;
       console.log('✓ closingData:', dto.closingData, '->', updateData.closingData);
     }
+    if (dto.dateClosmod !== undefined && dto.dateClosmod !== null) {
+      updateData.dateClosmod = dto.dateClosmod ? new Date(dto.dateClosmod) : null;
+      console.log('✓ dateClosmod:', dto.dateClosmod, '->', updateData.dateClosmod);
+    }
 
     console.log('Final update data:', JSON.stringify(updateData, null, 2));
 
