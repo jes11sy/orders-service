@@ -1,14 +1,21 @@
-import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { Injectable, ForbiddenException, NotFoundException, Logger } from '@nestjs/common';
+import { HttpService } from '@nestjs/axios';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { CreateOrderFromCallDto } from './dto/create-order-from-call.dto';
 import { CreateOrderFromChatDto } from './dto/create-order-from-chat.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { UserRole } from '../auth/roles.guard';
+import { firstValueFrom } from 'rxjs';
 
 @Injectable()
 export class OrdersService {
-  constructor(private prisma: PrismaService) {}
+  private readonly logger = new Logger(OrdersService.name);
+
+  constructor(
+    private prisma: PrismaService,
+    private httpService: HttpService,
+  ) {}
 
   async getOrders(query: any, user: any) {
     const { page = 1, limit = 50, status, city, search, masterId } = query;
@@ -197,7 +204,7 @@ export class OrdersService {
     return { success: true, data: order };
   }
 
-  async updateOrder(id: number, dto: UpdateOrderDto, user: any) {
+  async updateOrder(id: number, dto: UpdateOrderDto, user: any, headers?: any) {
     console.log('=== UPDATE ORDER DEBUG ===');
     console.log('Order ID:', id);
     console.log('DTO received:', JSON.stringify(dto, null, 2));
@@ -431,6 +438,86 @@ export class OrdersService {
     });
 
     return { success: true, data: updated };
+  }
+
+  /**
+   * Синхронизация записи прихода в cash-service
+   * Создает новую запись или обновляет существующую
+   */
+  private async syncCashReceipt(order: any, user: any, requestHeaders?: any) {
+    try {
+      const cashServiceUrl = process.env.CASH_SERVICE_URL || 'http://cash-service.backend.svc.cluster.local:5006';
+      
+      // Подготовка данных для записи в cash
+      const masterChangeAmount = order.masterChange ? Number(order.masterChange) : 0;
+      const resultAmount = order.result ? Number(order.result) : 0;
+      
+      const cashData = {
+        name: 'приход',
+        amount: masterChangeAmount,
+        city: order.city || 'Не указан',
+        note: `Итог по заказу: ${resultAmount}₽`,
+        paymentPurpose: `Заказ №${order.id}`,
+        receiptDoc: order.bsoDoc || null,
+      };
+
+      this.logger.log(`📤 Sending cash receipt to cash-service for order #${order.id}`);
+      this.logger.debug(`Cash data: ${JSON.stringify(cashData)}`);
+
+      // Получаем JWT токен из заголовков запроса
+      const authHeader = requestHeaders?.authorization || requestHeaders?.Authorization;
+      const headers: any = {
+        'Content-Type': 'application/json',
+      };
+
+      if (authHeader) {
+        headers['Authorization'] = authHeader;
+        this.logger.debug(`Using Authorization header for cash-service request`);
+      } else {
+        this.logger.warn(`No Authorization header found, cash-service request may fail`);
+      }
+
+      // Отправляем запрос к cash-service
+      const response = await firstValueFrom(
+        this.httpService.post(
+          `${cashServiceUrl}/api/v1/cash`,
+          cashData,
+          { headers }
+        )
+      );
+
+      this.logger.log(`✅ Cash receipt created/updated for order #${order.id}: ${response.data?.data?.id || 'N/A'}`);
+      
+      // Обновляем статус подачи кассы в заказе
+      await this.prisma.order.update({
+        where: { id: order.id },
+        data: {
+          cashSubmissionStatus: 'Сдано',
+          cashSubmissionDate: new Date(),
+          cashSubmissionAmount: masterChangeAmount,
+        },
+      });
+
+      this.logger.log(`✅ Order #${order.id} cash submission status updated`);
+
+    } catch (error) {
+      this.logger.error(`❌ Failed to sync cash receipt for order #${order.id}: ${error.message}`);
+      this.logger.error(`Error details: ${error.response?.data ? JSON.stringify(error.response.data) : error.stack}`);
+      
+      // Не бросаем исключение, чтобы не блокировать обновление заказа
+      // Сохраняем информацию об ошибке в статусе
+      try {
+        await this.prisma.order.update({
+          where: { id: order.id },
+          data: {
+            cashSubmissionStatus: 'Ошибка синхронизации',
+            cashSubmissionDate: new Date(),
+          },
+        });
+      } catch (updateError) {
+        this.logger.error(`Failed to update cash submission error status: ${updateError.message}`);
+      }
+    }
   }
 
 }
