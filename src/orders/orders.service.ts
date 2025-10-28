@@ -440,6 +440,47 @@ export class OrdersService {
     return { success: true, data: updated };
   }
 
+  async getOrderAvitoChat(id: number, user: any) {
+    const order = await this.prisma.order.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        avitoChatId: true,
+        avitoName: true,
+        phone: true,
+        clientName: true,
+        masterId: true,
+      },
+    });
+
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+
+    // RBAC проверка
+    if (user.role === 'master' && order.masterId !== user.userId) {
+      throw new ForbiddenException('Access denied');
+    }
+
+    if (!order.avitoChatId || !order.avitoName) {
+      return {
+        success: false,
+        message: 'No Avito chat data for this order',
+        data: null,
+      };
+    }
+
+    return {
+      success: true,
+      data: {
+        chatId: order.avitoChatId,
+        avitoAccountName: order.avitoName,
+        clientName: order.clientName,
+        phone: order.phone,
+      },
+    };
+  }
+
   /**
    * Синхронизация записи прихода в cash-service
    * Создает новую запись или обновляет существующую

@@ -133,5 +133,13 @@ export class OrdersController {
     };
   }
 
+  @Get(':id/avito-chat')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get Avito chat info for order' })
+  async getOrderAvitoChat(@Param('id') id: string, @Request() req) {
+    return this.ordersService.getOrderAvitoChat(+id, req.user);
+  }
+
 }
 
