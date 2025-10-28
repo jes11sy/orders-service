@@ -91,7 +91,8 @@ export class OrdersController {
   @Roles(UserRole.operator, UserRole.director, UserRole.master)
   @ApiOperation({ summary: 'Update order (operator, director, master)' })
   async updateOrder(@Param('id') id: string, @Body() dto: UpdateOrderDto, @Request() req) {
-    return this.ordersService.updateOrder(+id, dto, req.user);
+    // Передаем весь объект request для доступа к headers (JWT токен)
+    return this.ordersService.updateOrder(+id, dto, req.user, req.headers);
   }
 
   @Patch(':id/status')
