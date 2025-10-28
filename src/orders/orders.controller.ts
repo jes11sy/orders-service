@@ -88,8 +88,8 @@ export class OrdersController {
   @Put(':id')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @ApiBearerAuth()
-  @Roles(UserRole.operator)
-  @ApiOperation({ summary: 'Update order (operator only)' })
+  @Roles(UserRole.operator, UserRole.director, UserRole.master)
+  @ApiOperation({ summary: 'Update order (operator, director, master)' })
   async updateOrder(@Param('id') id: string, @Body() dto: UpdateOrderDto, @Request() req) {
     return this.ordersService.updateOrder(+id, dto, req.user);
   }

@@ -39,21 +39,19 @@ export class OrdersService {
       ];
     }
 
-    // Получаем все заказы без пагинации для сортировки
-    const allOrders = await this.prisma.order.findMany({
-      where,
-      include: {
-        operator: { select: { id: true, name: true, login: true } },
-        master: { select: { id: true, name: true } },
-      },
-    });
-
-    // Сортируем заказы согласно требованиям
-    const sortedOrders = this.sortOrders(allOrders);
-    
-    // Применяем пагинацию к отсортированным данным
-    const data = sortedOrders.slice(skip, skip + +limit);
-    const total = sortedOrders.length;
+    const [data, total] = await Promise.all([
+      this.prisma.order.findMany({
+        where,
+        skip,
+        take: +limit,
+        orderBy: { createDate: 'desc' },
+        include: {
+          operator: { select: { id: true, name: true, login: true } },
+          master: { select: { id: true, name: true } },
+        },
+      }),
+      this.prisma.order.count({ where }),
+    ]);
 
     return {
       success: true,
@@ -386,46 +384,6 @@ export class OrdersService {
     });
 
     return { success: true, data: updated };
-  }
-
-  private sortOrders(orders: any[]) {
-    return orders.sort((a, b) => {
-      // Определяем приоритет статусов
-      const getStatusPriority = (status: string): number => {
-        switch (status) {
-          case 'Ожидает': return 1
-          case 'Принял': return 2
-          case 'В пути': return 3
-          case 'В работе': return 4
-          case 'Модерн': return 5
-          case 'Готово': return 6
-          case 'Отказ': return 7
-          case 'Незаказ': return 8
-          default: return 9
-        }
-      }
-
-      const priorityA = getStatusPriority(a.statusOrder)
-      const priorityB = getStatusPriority(b.statusOrder)
-
-      // Сначала сортируем по приоритету статуса
-      if (priorityA !== priorityB) {
-        return priorityA - priorityB
-      }
-
-      // Если статусы одинаковые, сортируем по дате
-      if (priorityA <= 5) {
-        // Для статусов "Ожидает", "Принял", "В пути", "В работе", "Модерн" - по дате встречи
-        const dateA = new Date(a.dateMeeting).getTime()
-        const dateB = new Date(b.dateMeeting).getTime()
-        return dateA - dateB // Ближайшая дата встреча идет первой
-      } else {
-        // Для статусов "Готово", "Отказ", "Незаказ" - по дате закрытия
-        const dateA = new Date(a.closingData || a.dateClosmod || 0).getTime()
-        const dateB = new Date(b.closingData || b.dateClosmod || 0).getTime()
-        return dateB - dateA // Более поздняя дата закрытия идет первой
-      }
-    })
   }
 
 }
