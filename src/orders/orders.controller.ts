@@ -101,7 +101,7 @@ export class OrdersController {
   @Roles(UserRole.operator, UserRole.director, UserRole.master)
   @ApiOperation({ summary: 'Update order status' })
   async updateStatus(@Param('id') id: string, @Body('status') status: string, @Request() req) {
-    return this.ordersService.updateStatus(+id, status, req.user);
+    return this.ordersService.updateStatus(+id, status, req.user, req.headers);
   }
 
   @Patch(':id/master')
