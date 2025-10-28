@@ -561,5 +561,73 @@ export class OrdersService {
     }
   }
 
+  async submitCashForReview(orderId: number, cashReceiptDoc: string | undefined, user: any) {
+    this.logger.log(`Submitting cash for review: Order ${orderId} by Master ${user.userId}`);
+
+    try {
+      // Проверяем существование заказа
+      const order = await this.prisma.order.findUnique({
+        where: { id: orderId },
+        include: {
+          master: {
+            select: { id: true, name: true }
+          }
+        }
+      });
+
+      if (!order) {
+        return {
+          success: false,
+          error: 'Заказ не найден'
+        };
+      }
+
+      // Проверяем, что заказ принадлежит этому мастеру
+      if (order.masterId !== user.userId) {
+        return {
+          success: false,
+          error: 'Вы не можете отправить сдачу по чужому заказу'
+        };
+      }
+
+      // Проверяем статус заказа
+      if (order.statusOrder !== 'Готово') {
+        return {
+          success: false,
+          error: 'Можно отправить сдачу только по завершенным заказам'
+        };
+      }
+
+      // Обновляем заказ
+      const updatedOrder = await this.prisma.order.update({
+        where: { id: orderId },
+        data: {
+          cashSubmissionStatus: 'На проверке',
+          cashReceiptDoc: cashReceiptDoc || null,
+          cashSubmissionDate: new Date(),
+          cashSubmissionAmount: order.masterChange || 0,
+        }
+      });
+
+      this.logger.log(`✅ Cash submission successful: Order #${orderId}, Status: "На проверке"`);
+
+      return {
+        success: true,
+        message: 'Сдача успешно отправлена на проверку',
+        data: {
+          id: updatedOrder.id,
+          cashSubmissionStatus: updatedOrder.cashSubmissionStatus,
+          cashReceiptDoc: updatedOrder.cashReceiptDoc,
+        }
+      };
+    } catch (error) {
+      this.logger.error(`❌ Failed to submit cash for review: ${error.message}`, error.stack);
+      return {
+        success: false,
+        error: `Ошибка при отправке сдачи: ${error.message}`
+      };
+    }
+  }
+
 }
 

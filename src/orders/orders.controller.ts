@@ -141,5 +141,19 @@ export class OrdersController {
     return this.ordersService.getOrderAvitoChat(+id, req.user);
   }
 
+  @Patch(':id/submit-cash')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @ApiBearerAuth()
+  @Roles(UserRole.master)
+  @ApiOperation({ summary: 'Submit cash for review' })
+  async submitCashForReview(
+    @Param('id') id: string,
+    @Body() body: { cashReceiptDoc?: string },
+    @Request() req
+  ) {
+    this.logger.log(`Master ${req.user.userId} submitting cash for order ${id}`);
+    return this.ordersService.submitCashForReview(+id, body.cashReceiptDoc, req.user);
+  }
+
 }
 
