@@ -533,13 +533,13 @@ export class OrdersService {
       await this.prisma.order.update({
         where: { id: order.id },
         data: {
-          cashSubmissionStatus: 'Сдано',
+          cashSubmissionStatus: 'Не отправлено',
           cashSubmissionDate: new Date(),
           cashSubmissionAmount: masterChangeAmount,
         },
       });
 
-      this.logger.log(`✅ Order #${order.id} cash submission status updated`);
+      this.logger.log(`✅ Order #${order.id} cash submission status set to "Не отправлено"`);
 
     } catch (error) {
       this.logger.error(`❌ Failed to sync cash receipt for order #${order.id}: ${error.message}`);
