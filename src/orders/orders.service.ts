@@ -43,11 +43,19 @@ export class OrdersService {
     if (city) where.city = city;
     if (masterId) where.masterId = +masterId;
     if (search) {
-      where.OR = [
+      const searchConditions: any[] = [
         { phone: { contains: search } },
         { clientName: { contains: search } },
         { address: { contains: search } },
       ];
+      
+      // Если search - это число, добавляем поиск по ID
+      const searchAsNumber = parseInt(search, 10);
+      if (!isNaN(searchAsNumber)) {
+        searchConditions.push({ id: searchAsNumber });
+      }
+      
+      where.OR = searchConditions;
     }
 
     const [data, total] = await Promise.all([
