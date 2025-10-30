@@ -6,7 +6,15 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { CreateOrderFromCallDto } from './dto/create-order-from-call.dto';
 import { CreateOrderFromChatDto } from './dto/create-order-from-chat.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
+import { QueryOrdersDto } from './dto/query-orders.dto';
 import { RolesGuard, Roles, UserRole } from '../auth/roles.guard';
+import { AuthUser } from '../types/auth-user.type';
+
+// ✅ ИСПРАВЛЕНИЕ: Типизированный Request
+interface AuthenticatedRequest {
+  user: AuthUser;
+  headers: Record<string, string | string[] | undefined>;
+}
 
 @ApiTags('orders')
 @Controller('orders')
@@ -30,7 +38,7 @@ export class OrdersController {
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get all orders with filters' })
-  async getOrders(@Query() query: any, @Request() req) {
+  async getOrders(@Query() query: QueryOrdersDto, @Request() req: AuthenticatedRequest) {
     return this.ordersService.getOrders(query, req.user);
   }
 
@@ -39,14 +47,15 @@ export class OrdersController {
   @ApiBearerAuth()
   @Roles(UserRole.operator)
   @ApiOperation({ summary: 'Create new order' })
-  async createOrder(@Body() dto: CreateOrderDto, @Request() req) {
-    this.logger.log('Creating order with data:', JSON.stringify(dto));
+  async createOrder(@Body() dto: CreateOrderDto, @Request() req: AuthenticatedRequest) {
+    // ✅ ИСПРАВЛЕНИЕ: Удалено логирование конфиденциальных данных
+    this.logger.log(`Creating order for operator ${req.user.userId}`);
     try {
       const result = await this.ordersService.createOrder(dto, req.user);
-      this.logger.log('Order created successfully:', result.data.id);
+      this.logger.log(`Order created successfully: #${result.data.id}`);
       return result;
     } catch (error) {
-      this.logger.error('Error creating order:', error.message);
+      this.logger.error(`Error creating order: ${error.message}`);
       throw new BadRequestException(`Failed to create order: ${error.message}`);
     }
   }
@@ -56,7 +65,7 @@ export class OrdersController {
   @ApiBearerAuth()
   @Roles(UserRole.operator)
   @ApiOperation({ summary: 'Create order from call' })
-  async createOrderFromCall(@Body() dto: CreateOrderFromCallDto, @Request() req) {
+  async createOrderFromCall(@Body() dto: CreateOrderFromCallDto, @Request() req: AuthenticatedRequest) {
     return this.ordersService.createOrderFromCall(dto, req.user);
   }
 
@@ -65,14 +74,15 @@ export class OrdersController {
   @ApiBearerAuth()
   @Roles(UserRole.operator)
   @ApiOperation({ summary: 'Create order from chat' })
-  async createOrderFromChat(@Body() dto: CreateOrderFromChatDto, @Request() req) {
-    this.logger.log('Creating order from chat with data:', JSON.stringify(dto));
+  async createOrderFromChat(@Body() dto: CreateOrderFromChatDto, @Request() req: AuthenticatedRequest) {
+    // ✅ ИСПРАВЛЕНИЕ: Удалено логирование конфиденциальных данных
+    this.logger.log(`Creating order from chat for operator ${req.user.userId}`);
     try {
       const result = await this.ordersService.createOrderFromChat(dto, req.user);
-      this.logger.log('Order from chat created successfully:', result.data.id);
+      this.logger.log(`Order from chat created successfully: #${result.data.id}`);
       return result;
     } catch (error) {
-      this.logger.error('Error creating order from chat:', error.message);
+      this.logger.error(`Error creating order from chat: ${error.message}`);
       throw new BadRequestException(`Failed to create order from chat: ${error.message}`);
     }
   }
@@ -81,7 +91,7 @@ export class OrdersController {
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get order by ID' })
-  async getOrder(@Param('id') id: string, @Request() req) {
+  async getOrder(@Param('id') id: string, @Request() req: AuthenticatedRequest) {
     return this.ordersService.getOrder(+id, req.user);
   }
 
@@ -90,8 +100,7 @@ export class OrdersController {
   @ApiBearerAuth()
   @Roles(UserRole.operator, UserRole.director, UserRole.master)
   @ApiOperation({ summary: 'Update order (operator, director, master)' })
-  async updateOrder(@Param('id') id: string, @Body() dto: UpdateOrderDto, @Request() req) {
-    // Передаем весь объект request для доступа к headers (JWT токен)
+  async updateOrder(@Param('id') id: string, @Body() dto: UpdateOrderDto, @Request() req: AuthenticatedRequest) {
     return this.ordersService.updateOrder(+id, dto, req.user, req.headers);
   }
 
@@ -100,7 +109,7 @@ export class OrdersController {
   @ApiBearerAuth()
   @Roles(UserRole.operator, UserRole.director, UserRole.master)
   @ApiOperation({ summary: 'Update order status' })
-  async updateStatus(@Param('id') id: string, @Body('status') status: string, @Request() req) {
+  async updateStatus(@Param('id') id: string, @Body('status') status: string, @Request() req: AuthenticatedRequest) {
     return this.ordersService.updateStatus(+id, status, req.user, req.headers);
   }
 
@@ -137,7 +146,7 @@ export class OrdersController {
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get Avito chat info for order' })
-  async getOrderAvitoChat(@Param('id') id: string, @Request() req) {
+  async getOrderAvitoChat(@Param('id') id: string, @Request() req: AuthenticatedRequest) {
     return this.ordersService.getOrderAvitoChat(+id, req.user);
   }
 
@@ -149,7 +158,7 @@ export class OrdersController {
   async submitCashForReview(
     @Param('id') id: string,
     @Body() body: { cashReceiptDoc?: string },
-    @Request() req
+    @Request() req: AuthenticatedRequest
   ) {
     this.logger.log(`Master ${req.user.userId} submitting cash for order ${id}`);
     return this.ordersService.submitCashForReview(+id, body.cashReceiptDoc, req.user);

@@ -47,6 +47,7 @@ model Order {
   operator CallcentreOperator @relation(fields: [operatorNameId], references: [id])
   master   Master?             @relation(fields: [masterId], references: [id])
 
+  // ✅ ИСПРАВЛЕНИЕ: Добавлены недостающие индексы для оптимизации запросов
   @@index([statusOrder, city])
   @@index([closingData])
   @@index([masterId, city, closingData])
@@ -54,6 +55,11 @@ model Order {
   @@index([createDate, city])
   @@index([operatorNameId])
   @@index([createDate])
+  @@index([clientName]) // ✅ Для поиска по имени клиента
+  @@index([address]) // ✅ Для поиска по адресу
+  @@index([statusOrder, masterId]) // ✅ Частая комбинация фильтров
+  @@index([avitoChatId]) // ✅ Для поиска по чатам Avito
+  @@index([cashSubmissionStatus]) // ✅ Для фильтрации по статусу сдачи кассы
   @@map("orders")
 }
 
