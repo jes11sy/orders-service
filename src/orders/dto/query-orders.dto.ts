@@ -44,5 +44,17 @@ export class QueryOrdersDto {
   @IsInt()
   @Min(1)
   masterId?: number;
+
+  @ApiPropertyOptional({ description: 'Поиск по имени мастера' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  @Transform(({ value }) => value?.trim())
+  master?: string;
+
+  @ApiPropertyOptional({ description: 'Дата закрытия (фильтр по дате)' })
+  @IsOptional()
+  @IsString()
+  closingDate?: string;
 }
 

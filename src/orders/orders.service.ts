@@ -22,7 +22,7 @@ export class OrdersService {
 
   // ✅ ИСПРАВЛЕНИЕ: Строгая типизация вместо any
   async getOrders(query: QueryOrdersDto, user: AuthUser) {
-    const { page = 1, limit = 50, status, city, search, masterId } = query;
+    const { page = 1, limit = 50, status, city, search, masterId, master, closingDate } = query;
     const skip = (page - 1) * limit;
 
     const where: any = {};
@@ -42,6 +42,26 @@ export class OrdersService {
     if (status) where.statusOrder = status;
     if (city) where.city = city;
     if (masterId) where.masterId = +masterId;
+    
+    // Фильтр по имени мастера
+    if (master) {
+      where.master = {
+        name: { contains: master, mode: 'insensitive' }
+      };
+    }
+    
+    // Фильтр по дате закрытия
+    if (closingDate) {
+      const date = new Date(closingDate);
+      const nextDay = new Date(date);
+      nextDay.setDate(nextDay.getDate() + 1);
+      
+      where.closingData = {
+        gte: date,
+        lt: nextDay
+      };
+    }
+    
     if (search) {
       const searchConditions: any[] = [
         { phone: { contains: search } },
