@@ -78,12 +78,10 @@ export class OrdersService {
       where.OR = searchConditions;
     }
 
-    const [data, total] = await Promise.all([
+    // Получаем все данные без пагинации для правильной сортировки
+    const [allData, total] = await Promise.all([
       this.prisma.order.findMany({
         where,
-        skip,
-        take: +limit,
-        orderBy: { createDate: 'desc' },
         include: {
           operator: { select: { id: true, name: true, login: true } },
           master: { select: { id: true, name: true } },
@@ -91,6 +89,48 @@ export class OrdersService {
       }),
       this.prisma.order.count({ where }),
     ]);
+
+    // Кастомная сортировка по статусам
+    const activeStatusOrder = ['Ожидает', 'Принял', 'В пути', 'В работе', 'Модерн'];
+    const closedStatuses = ['Готово', 'Отказ', 'Незаказ'];
+
+    const sortedData = allData.sort((a, b) => {
+      const isAActive = activeStatusOrder.includes(a.statusOrder);
+      const isBActive = activeStatusOrder.includes(b.statusOrder);
+      const isAClosed = closedStatuses.includes(a.statusOrder);
+      const isBClosed = closedStatuses.includes(b.statusOrder);
+      
+      // Активные статусы всегда идут перед закрытыми
+      if (isAActive && isBClosed) return -1;
+      if (isAClosed && isBActive) return 1;
+      
+      // Оба активных - сортируем по порядку статусов, затем по дате встречи
+      if (isAActive && isBActive) {
+        const statusA = activeStatusOrder.indexOf(a.statusOrder);
+        const statusB = activeStatusOrder.indexOf(b.statusOrder);
+        
+        if (statusA !== statusB) {
+          return statusA - statusB;
+        }
+        
+        // Внутри одного статуса сортируем по дате встречи (ASC - ранние даты сначала)
+        const dateA = a.dateMeeting ? new Date(a.dateMeeting).getTime() : Number.MAX_VALUE;
+        const dateB = b.dateMeeting ? new Date(b.dateMeeting).getTime() : Number.MAX_VALUE;
+        return dateA - dateB;
+      }
+      
+      // Оба закрытых - сортируем ТОЛЬКО по дате закрытия (DESC - свежие сначала), БЕЗ учета статуса
+      if (isAClosed && isBClosed) {
+        const dateA = a.closingData ? new Date(a.closingData).getTime() : 0;
+        const dateB = b.closingData ? new Date(b.closingData).getTime() : 0;
+        return dateB - dateA;
+      }
+      
+      return 0;
+    });
+
+    // Применяем пагинацию после сортировки
+    const data = sortedData.slice(skip, skip + +limit);
 
     return {
       success: true,
