@@ -69,9 +69,10 @@ export class OrdersService {
         { address: { contains: search } },
       ];
       
-      // Если search - это число, добавляем поиск по ID
+      // Если search - это число и оно в разумных пределах для ID, добавляем поиск по ID
+      // Максимальный ID ограничен 1 миллионом, чтобы исключить номера телефонов
       const searchAsNumber = parseInt(search, 10);
-      if (!isNaN(searchAsNumber)) {
+      if (!isNaN(searchAsNumber) && searchAsNumber > 0 && searchAsNumber < 1000000) {
         searchConditions.push({ id: searchAsNumber });
       }
       
