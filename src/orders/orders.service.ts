@@ -374,10 +374,10 @@ export class OrdersService {
     if (dto.masterChange !== undefined && dto.masterChange !== null) updateData.masterChange = dto.masterChange;
     if (dto.prepayment !== undefined && dto.prepayment !== null) updateData.prepayment = dto.prepayment;
     
-    // Документы
-    if (dto.bsoDoc !== undefined && dto.bsoDoc !== null) updateData.bsoDoc = dto.bsoDoc;
-    if (dto.expenditureDoc !== undefined && dto.expenditureDoc !== null) updateData.expenditureDoc = dto.expenditureDoc;
-    if (dto.cashReceiptDoc !== undefined && dto.cashReceiptDoc !== null) updateData.cashReceiptDoc = dto.cashReceiptDoc;
+    // Документы (разрешаем null для удаления)
+    if (dto.bsoDoc !== undefined) updateData.bsoDoc = dto.bsoDoc;
+    if (dto.expenditureDoc !== undefined) updateData.expenditureDoc = dto.expenditureDoc;
+    if (dto.cashReceiptDoc !== undefined) updateData.cashReceiptDoc = dto.cashReceiptDoc;
     
     // Дополнительные поля
     if (dto.comment !== undefined && dto.comment !== null) updateData.comment = dto.comment;
