@@ -6,31 +6,43 @@ import { ConfigService } from '@nestjs/config';
 interface NewOrderNotification {
   orderId: number;
   city: string;
-  rk: string;
+  clientName: string;
+  phone: string;
+  address: string;
+  dateMeeting: string;
+  problem: string;
+  rk?: string;
   avitoName?: string;
-  typeEquipment: string;
+  typeEquipment?: string;
 }
 
 interface DateChangeNotification {
   orderId: number;
   city: string;
-  masterId?: number;
+  clientName: string;
   newDate: string;
+  oldDate?: string;
+  masterId?: number;
 }
 
 interface OrderRejectionNotification {
   orderId: number;
   city: string;
+  clientName: string;
+  phone: string;
+  reason: string;
   masterId?: number;
-  reason?: string;
 }
 
 interface MasterAssignedNotification {
   orderId: number;
   masterId: number;
-  rk: string;
+  rk?: string;
   avitoName?: string;
-  typeEquipment: string;
+  typeEquipment?: string;
+  clientName?: string;
+  address?: string;
+  dateMeeting?: string;
 }
 
 @Injectable()

@@ -167,6 +167,11 @@ export class OrdersService {
     this.notificationsService.sendNewOrderNotification({
       orderId: order.id,
       city: order.city,
+      clientName: order.nameClient,
+      phone: order.phone,
+      address: order.address,
+      dateMeeting: order.dateMeeting.toISOString(),
+      problem: order.problem,
       rk: order.rk,
       avitoName: order.avitoName ?? undefined,
       typeEquipment: order.typeEquipment,
@@ -231,6 +236,11 @@ export class OrdersService {
     this.notificationsService.sendNewOrderNotification({
       orderId: order.id,
       city: order.city,
+      clientName: order.nameClient,
+      phone: order.phone,
+      address: order.address,
+      dateMeeting: order.dateMeeting.toISOString(),
+      problem: order.problem,
       rk: order.rk,
       avitoName: order.avitoName ?? undefined,
       typeEquipment: order.typeEquipment,
@@ -273,6 +283,11 @@ export class OrdersService {
     this.notificationsService.sendNewOrderNotification({
       orderId: order.id,
       city: order.city,
+      clientName: order.nameClient,
+      phone: order.phone,
+      address: order.address,
+      dateMeeting: order.dateMeeting.toISOString(),
+      problem: order.problem,
       rk: order.rk,
       avitoName: order.avitoName ?? undefined,
       typeEquipment: order.typeEquipment,
@@ -405,8 +420,10 @@ export class OrdersService {
       this.notificationsService.sendDateChangeNotification({
         orderId: updated.id,
         city: updated.city,
-        masterId: updated.masterId || undefined,
+        clientName: updated.nameClient,
         newDate: updated.dateMeeting.toISOString(),
+        oldDate: order.dateMeeting.toISOString(),
+        masterId: updated.masterId || undefined,
       });
     }
 
@@ -415,8 +432,10 @@ export class OrdersService {
       this.notificationsService.sendOrderRejectionNotification({
         orderId: updated.id,
         city: updated.city,
-        masterId: updated.masterId || undefined,
+        clientName: updated.nameClient,
+        phone: updated.phone,
         reason: dto.statusOrder,
+        masterId: updated.masterId || undefined,
       });
     }
 
@@ -428,6 +447,9 @@ export class OrdersService {
         rk: updated.rk,
         avitoName: updated.avitoName ?? undefined,
         typeEquipment: updated.typeEquipment,
+        clientName: updated.nameClient,
+        address: updated.address,
+        dateMeeting: updated.dateMeeting.toISOString(),
       });
     }
     
