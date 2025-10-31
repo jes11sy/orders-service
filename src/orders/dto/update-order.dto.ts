@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNumber, IsDateString, MaxLength, Matches, IsIn, Min, Max } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsDateString, MaxLength, Matches, IsIn, Min, Max, ValidateIf } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 
@@ -141,17 +141,19 @@ export class UpdateOrderDto {
   prepayment?: number;
   
   // Документы
-  @ApiProperty({ required: false, description: 'Документ БСО' })
+  @ApiProperty({ required: false, description: 'Документ БСО', nullable: true })
+  @ValidateIf((o) => o.bsoDoc !== null)
   @IsString()
   @IsOptional()
   @MaxLength(500)
-  bsoDoc?: string;
+  bsoDoc?: string | null;
 
-  @ApiProperty({ required: false, description: 'Документ расходов' })
+  @ApiProperty({ required: false, description: 'Документ расходов', nullable: true })
+  @ValidateIf((o) => o.expenditureDoc !== null)
   @IsString()
   @IsOptional()
   @MaxLength(500)
-  expenditureDoc?: string;
+  expenditureDoc?: string | null;
 
   @ApiProperty({ required: false, description: 'Документ кассового чека' })
   @IsString()
