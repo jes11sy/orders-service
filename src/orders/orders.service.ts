@@ -167,7 +167,7 @@ export class OrdersService {
     this.notificationsService.sendNewOrderNotification({
       orderId: order.id,
       city: order.city,
-      clientName: order.nameClient,
+      clientName: order.clientName,
       phone: order.phone,
       address: order.address,
       dateMeeting: order.dateMeeting.toISOString(),
@@ -236,7 +236,7 @@ export class OrdersService {
     this.notificationsService.sendNewOrderNotification({
       orderId: order.id,
       city: order.city,
-      clientName: order.nameClient,
+      clientName: order.clientName,
       phone: order.phone,
       address: order.address,
       dateMeeting: order.dateMeeting.toISOString(),
@@ -283,7 +283,7 @@ export class OrdersService {
     this.notificationsService.sendNewOrderNotification({
       orderId: order.id,
       city: order.city,
-      clientName: order.nameClient,
+      clientName: order.clientName,
       phone: order.phone,
       address: order.address,
       dateMeeting: order.dateMeeting.toISOString(),
@@ -420,7 +420,7 @@ export class OrdersService {
       this.notificationsService.sendDateChangeNotification({
         orderId: updated.id,
         city: updated.city,
-        clientName: updated.nameClient,
+        clientName: updated.clientName,
         newDate: updated.dateMeeting.toISOString(),
         oldDate: order.dateMeeting.toISOString(),
         masterId: updated.masterId || undefined,
@@ -432,7 +432,7 @@ export class OrdersService {
       this.notificationsService.sendOrderRejectionNotification({
         orderId: updated.id,
         city: updated.city,
-        clientName: updated.nameClient,
+        clientName: updated.clientName,
         phone: updated.phone,
         reason: dto.statusOrder,
         masterId: updated.masterId || undefined,
@@ -447,7 +447,7 @@ export class OrdersService {
         rk: updated.rk,
         avitoName: updated.avitoName ?? undefined,
         typeEquipment: updated.typeEquipment,
-        clientName: updated.nameClient,
+        clientName: updated.clientName,
         address: updated.address,
         dateMeeting: updated.dateMeeting.toISOString(),
       });
