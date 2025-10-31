@@ -57,7 +57,38 @@ CASH_SERVICE_URL=http://cash-service:5006
 
 **Local:**
 ```
-CASH_SERVICE_URL=http://localhost:5006
+CASH_SERVICE_URL=http:// localhost:5006
+```
+
+### NOTIFICATIONS_SERVICE_URL
+URL для отправки уведомлений через notifications-service.
+
+**Kubernetes:**
+```
+NOTIFICATIONS_SERVICE_URL=http://notifications-service.crm.svc.cluster.local:5006/api/v1
+```
+
+**Docker Compose:**
+```
+NOTIFICATIONS_SERVICE_URL=http://notifications-service:5006/api/v1
+```
+
+**Local:**
+```
+NOTIFICATIONS_SERVICE_URL=http://localhost:5006/api/v1
+```
+
+### NOTIFICATIONS_WEBHOOK_TOKEN
+Секретный токен для авторизации webhook запросов к notifications-service.
+
+**Требования:**
+- ✅ Минимум 32 символа
+- ✅ Должен совпадать с токеном в notifications-service
+- ❌ Не использовать простые пароли
+
+**Генерация:**
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
 ## Опциональные переменные
@@ -94,6 +125,8 @@ PORT=5002
 NODE_ENV=development
 CORS_ORIGIN=http://localhost:3000
 CASH_SERVICE_URL=http://localhost:5006
+NOTIFICATIONS_SERVICE_URL=http://localhost:5006/api/v1
+NOTIFICATIONS_WEBHOOK_TOKEN=dev-webhook-token-min-32-characters-123456789
 LOG_LEVEL=debug
 ```
 
@@ -105,6 +138,8 @@ PORT=5002
 NODE_ENV=production
 CORS_ORIGIN=https://app.company.com,https://admin.company.com
 CASH_SERVICE_URL=http://cash-service.backend.svc.cluster.local:5006
+NOTIFICATIONS_SERVICE_URL=http://notifications-service.crm.svc.cluster.local:5006/api/v1
+NOTIFICATIONS_WEBHOOK_TOKEN=<64-символьный случайный ключ>
 LOG_LEVEL=warn
 SENTRY_DSN=https://xxx@sentry.io/xxx
 ```
@@ -122,6 +157,7 @@ data:
   NODE_ENV: "production"
   CORS_ORIGIN: "https://app.company.com"
   CASH_SERVICE_URL: "http://cash-service.backend.svc.cluster.local:5006"
+  NOTIFICATIONS_SERVICE_URL: "http://notifications-service.crm.svc.cluster.local:5006/api/v1"
   LOG_LEVEL: "warn"
 ```
 
@@ -135,6 +171,7 @@ type: Opaque
 stringData:
   DATABASE_URL: "postgresql://user:pass@postgres:5432/db?connection_limit=20"
   JWT_SECRET: "<ваш-секретный-ключ>"
+  NOTIFICATIONS_WEBHOOK_TOKEN: "<64-символьный-ключ-совпадает-с-notifications-service>"
   SENTRY_DSN: "https://xxx@sentry.io/xxx"
 ```
 
@@ -149,9 +186,10 @@ services:
       - NODE_ENV=production
       - CORS_ORIGIN=https://app.example.com
       - CASH_SERVICE_URL=http://cash-service:5006
+      - NOTIFICATIONS_SERVICE_URL=http://notifications-service:5006/api/v1
       - LOG_LEVEL=info
     env_file:
-      - .env.secret  # DATABASE_URL, JWT_SECRET
+      - .env.secret  # DATABASE_URL, JWT_SECRET, NOTIFICATIONS_WEBHOOK_TOKEN
 ```
 
 ## Проверка конфигурации

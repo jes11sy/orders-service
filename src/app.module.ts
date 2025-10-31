@@ -4,6 +4,7 @@ import { PrometheusModule } from '@willsoto/nestjs-prometheus';
 import { OrdersModule } from './orders/orders.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { AuthModule } from './auth/auth.module';
     PrismaModule,
     AuthModule,
     OrdersModule,
+    NotificationsModule,
   ],
 })
 export class AppModule {}

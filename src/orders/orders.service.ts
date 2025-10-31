@@ -10,6 +10,7 @@ import { UserRole } from '../auth/roles.guard';
 import { AuthUser } from '../types/auth-user.type';
 import { maskSensitiveData, getFieldNames } from '../utils/masking.util';
 import { firstValueFrom } from 'rxjs';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class OrdersService {
@@ -18,6 +19,7 @@ export class OrdersService {
   constructor(
     private prisma: PrismaService,
     private httpService: HttpService,
+    private notificationsService: NotificationsService,
   ) {}
 
   // ✅ ИСПРАВЛЕНИЕ: Строгая типизация вместо any
@@ -161,6 +163,15 @@ export class OrdersService {
       },
     });
 
+    // Отправляем уведомление директору города о новом заказе
+    this.notificationsService.sendNewOrderNotification({
+      orderId: order.id,
+      city: order.city,
+      rk: order.rk,
+      avitoName: order.avitoName,
+      typeEquipment: order.typeEquipment,
+    });
+
     return { 
       success: true, 
       data: order,
@@ -216,6 +227,15 @@ export class OrdersService {
       },
     });
 
+    // Отправляем уведомление директору города о новом заказе
+    this.notificationsService.sendNewOrderNotification({
+      orderId: order.id,
+      city: order.city,
+      rk: order.rk,
+      avitoName: order.avitoName,
+      typeEquipment: order.typeEquipment,
+    });
+
     return { 
       success: true, 
       data: order,
@@ -247,6 +267,15 @@ export class OrdersService {
         operator: true,
         master: true,
       },
+    });
+
+    // Отправляем уведомление директору города о новом заказе
+    this.notificationsService.sendNewOrderNotification({
+      orderId: order.id,
+      city: order.city,
+      rk: order.rk,
+      avitoName: order.avitoName,
+      typeEquipment: order.typeEquipment,
     });
 
     return { 
@@ -368,6 +397,38 @@ export class OrdersService {
       // Fire-and-forget: не ждем завершения
       this.syncCashReceipt(updated, user, headers)
         .catch(err => this.logger.error(`Failed to sync cash for order #${updated.id}: ${err.message}`));
+    }
+    
+    // 🔔 Отправляем уведомления при изменениях
+    // 1. Изменение даты встречи
+    if (dto.dateMeeting && order.dateMeeting.toISOString() !== new Date(dto.dateMeeting).toISOString()) {
+      this.notificationsService.sendDateChangeNotification({
+        orderId: updated.id,
+        city: updated.city,
+        masterId: updated.masterId || undefined,
+        newDate: updated.dateMeeting.toISOString(),
+      });
+    }
+
+    // 2. Отмена заказа (статус Отказ/Незаказ)
+    if (dto.statusOrder && (dto.statusOrder === 'Отказ' || dto.statusOrder === 'Незаказ') && order.statusOrder !== dto.statusOrder) {
+      this.notificationsService.sendOrderRejectionNotification({
+        orderId: updated.id,
+        city: updated.city,
+        masterId: updated.masterId || undefined,
+        reason: dto.statusOrder,
+      });
+    }
+
+    // 3. Назначение мастера
+    if (dto.masterId && order.masterId !== dto.masterId) {
+      this.notificationsService.sendMasterAssignedNotification({
+        orderId: updated.id,
+        masterId: dto.masterId,
+        rk: updated.rk,
+        avitoName: updated.avitoName,
+        typeEquipment: updated.typeEquipment,
+      });
     }
     
     return { 
