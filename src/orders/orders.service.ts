@@ -168,7 +168,7 @@ export class OrdersService {
       orderId: order.id,
       city: order.city,
       rk: order.rk,
-      avitoName: order.avitoName,
+      avitoName: order.avitoName ?? undefined,
       typeEquipment: order.typeEquipment,
     });
 
@@ -232,7 +232,7 @@ export class OrdersService {
       orderId: order.id,
       city: order.city,
       rk: order.rk,
-      avitoName: order.avitoName,
+      avitoName: order.avitoName ?? undefined,
       typeEquipment: order.typeEquipment,
     });
 
@@ -274,7 +274,7 @@ export class OrdersService {
       orderId: order.id,
       city: order.city,
       rk: order.rk,
-      avitoName: order.avitoName,
+      avitoName: order.avitoName ?? undefined,
       typeEquipment: order.typeEquipment,
     });
 
@@ -426,7 +426,7 @@ export class OrdersService {
         orderId: updated.id,
         masterId: dto.masterId,
         rk: updated.rk,
-        avitoName: updated.avitoName,
+        avitoName: updated.avitoName ?? undefined,
         typeEquipment: updated.typeEquipment,
       });
     }
