@@ -43,8 +43,10 @@ export class NotificationsService {
     private readonly httpService: HttpService,
     private readonly configService: ConfigService,
   ) {
-    this.notificationsUrl = this.configService.get<string>('NOTIFICATIONS_SERVICE_URL') || 'http://notifications-service:5006/api/v1';
+    this.notificationsUrl = this.configService.get<string>('NOTIFICATIONS_SERVICE_URL') || 'http://notifications-service.crm.svc.cluster.local:5006/api/v1';
     this.webhookToken = this.configService.get<string>('NOTIFICATIONS_WEBHOOK_TOKEN') || '';
+    this.logger.log(`Notifications URL: ${this.notificationsUrl}`);
+    this.logger.log(`Webhook token configured: ${this.webhookToken ? '✅' : '❌'}`);
   }
 
   /**
