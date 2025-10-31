@@ -439,18 +439,33 @@ export class OrdersService {
       });
     }
 
-    // 3. Назначение мастера
-    if (dto.masterId && order.masterId !== dto.masterId) {
-      this.notificationsService.sendMasterAssignedNotification({
-        orderId: updated.id,
-        masterId: dto.masterId,
-        rk: updated.rk,
-        avitoName: updated.avitoName ?? undefined,
-        typeEquipment: updated.typeEquipment,
-        clientName: updated.clientName,
-        address: updated.address,
-        dateMeeting: updated.dateMeeting.toISOString(),
-      });
+    // 3. Назначение/изменение мастера
+    if (dto.masterId !== undefined && order.masterId !== dto.masterId) {
+      this.logger.debug(`Master change: old=${order.masterId}, new=${dto.masterId}`);
+      
+      // Если был старый мастер и назначается новый (передача заказа)
+      if (order.masterId && dto.masterId) {
+        this.logger.debug(`Sending reassignment notification to old master ${order.masterId}`);
+        this.notificationsService.sendMasterReassignedNotification({
+          orderId: updated.id,
+          oldMasterId: order.masterId,
+        });
+      }
+      
+      // Если назначается мастер (новый или вместо старого)
+      if (dto.masterId) {
+        this.logger.debug(`Sending assignment notification to new master ${dto.masterId}`);
+        this.notificationsService.sendMasterAssignedNotification({
+          orderId: updated.id,
+          masterId: dto.masterId,
+          rk: updated.rk,
+          avitoName: updated.avitoName ?? undefined,
+          typeEquipment: updated.typeEquipment,
+          clientName: updated.clientName,
+          address: updated.address,
+          dateMeeting: updated.dateMeeting.toISOString(),
+        });
+      }
     }
     
     return { 

@@ -45,6 +45,11 @@ interface MasterAssignedNotification {
   dateMeeting?: string;
 }
 
+interface MasterReassignedNotification {
+  orderId: number;
+  oldMasterId: number;
+}
+
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
@@ -151,6 +156,29 @@ export class NotificationsService {
       this.logger.log(`✅ Master assigned notification sent for order #${data.orderId}`);
     } catch (error) {
       this.logger.error(`❌ Failed to send master assigned notification: ${error.message}`);
+    }
+  }
+
+  /**
+   * Отправка уведомления о передаче заказа другому мастеру
+   */
+  async sendMasterReassignedNotification(data: MasterReassignedNotification): Promise<void> {
+    try {
+      await firstValueFrom(
+        this.httpService.post(
+          `${this.notificationsUrl}/notifications/master-reassigned`,
+          data,
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Webhook-Token': this.webhookToken,
+            },
+          },
+        ),
+      );
+      this.logger.log(`✅ Master reassigned notification sent for order #${data.orderId}`);
+    } catch (error) {
+      this.logger.error(`❌ Failed to send master reassigned notification: ${error.message}`);
     }
   }
 }
