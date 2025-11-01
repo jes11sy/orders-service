@@ -585,14 +585,27 @@ export class OrdersService {
       const masterChangeAmount = order.masterChange ? Number(order.masterChange) : 0;
       const resultAmount = order.result ? Number(order.result) : 0;
       
-      const cashData = {
+      const cashData: any = {
         name: 'приход',
         amount: masterChangeAmount,
         city: order.city || 'Не указан',
         note: `Итог по заказу: ${resultAmount}₽`,
         paymentPurpose: `Заказ №${order.id}`,
-        receiptDoc: order.bsoDoc || null,
       };
+      
+      // Добавляем receiptDoc только если он есть
+      // Извлекаем путь из URL (убираем домен и query параметры)
+      if (order.bsoDoc) {
+        try {
+          const url = new URL(order.bsoDoc);
+          // Получаем путь без начального слеша (например: director/orders/bso_doc/file.jpg)
+          const path = url.pathname.startsWith('/') ? url.pathname.substring(1) : url.pathname;
+          cashData.receiptDoc = path;
+        } catch (e) {
+          // Если не URL, а просто путь - используем как есть
+          cashData.receiptDoc = order.bsoDoc;
+        }
+      }
 
       this.logger.debug(`Sending cash receipt to cash-service for order #${order.id}`);
 
