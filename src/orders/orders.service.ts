@@ -365,7 +365,10 @@ export class OrdersService {
         updateData.closingData = new Date();
       }
     }
-    if (dto.masterId !== undefined && dto.masterId !== null) updateData.masterId = dto.masterId;
+    // ✅ ИСПРАВЛЕНИЕ: Разрешаем очистку masterId (передача null)
+    if (dto.masterId !== undefined) {
+      updateData.masterId = dto.masterId; // может быть null при отказе мастера
+    }
     
     // Финансовые поля
     if (dto.result !== undefined && dto.result !== null) updateData.result = dto.result;
@@ -491,13 +494,14 @@ export class OrdersService {
       
       // Если мастер отказывается (masterId был, теперь null)
       if (order.masterId && dto.masterId === null) {
-        this.logger.debug(`Master ${order.masterId} declined order, notifying director`);
+        this.logger.debug(`Master ${order.masterId} declined order, notifying director and master`);
         this.notificationsService.sendOrderRejectionNotification({
           orderId: updated.id,
           city: updated.city,
           clientName: updated.clientName?.trim() || undefined,
           phone: updated.phone,
           reason: 'Мастер отказался от заказа',
+          masterId: order.masterId, // ✅ ИСПРАВЛЕНИЕ: Передаем ID мастера, который отказался
           rk: updated.rk?.trim() || undefined,
           avitoName: updated.avitoName?.trim() || undefined,
           typeEquipment: updated.typeEquipment?.trim() || undefined,
