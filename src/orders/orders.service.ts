@@ -427,7 +427,50 @@ export class OrdersService {
       });
     }
 
-    // 2. Отмена заказа (статус Отказ/Незаказ)
+    // 2. Принятие заказа мастером (статус Принял)
+    if (dto.statusOrder && dto.statusOrder === 'Принял' && order.statusOrder !== 'Принял') {
+      this.notificationsService.sendOrderAcceptedNotification({
+        orderId: updated.id,
+        masterId: updated.masterId,
+        rk: updated.rk,
+        avitoName: updated.avitoName ?? undefined,
+        typeEquipment: updated.typeEquipment,
+        clientName: updated.clientName,
+        dateMeeting: updated.dateMeeting.toISOString(),
+      });
+    }
+
+    // 2.1. Закрытие заказа (статус Готово)
+    if (dto.statusOrder && dto.statusOrder === 'Готово' && order.statusOrder !== 'Готово') {
+      this.notificationsService.sendOrderClosedNotification({
+        orderId: updated.id,
+        masterId: updated.masterId,
+        clientName: updated.clientName,
+        closingDate: new Date().toISOString(),
+        total: updated.result?.toString(),
+        expense: updated.expenditure?.toString(),
+        net: updated.clean?.toString(),
+        handover: updated.masterChange?.toString(),
+      });
+    }
+
+    // 2.2. Заказ в модерне (статус Модерн)
+    if (dto.statusOrder && dto.statusOrder === 'Модерн' && order.statusOrder !== 'Модерн') {
+      this.notificationsService.sendOrderInModernNotification({
+        orderId: updated.id,
+        masterId: updated.masterId,
+        rk: updated.rk,
+        avitoName: updated.avitoName ?? undefined,
+        typeEquipment: updated.typeEquipment,
+        clientName: updated.clientName,
+        dateMeeting: updated.dateMeeting.toISOString(),
+        prepayment: updated.prepayment?.toString(),
+        expectedClosingDate: updated.dateClosmod?.toISOString(),
+        comment: updated.comment,
+      });
+    }
+
+    // 3. Отмена заказа (статус Отказ/Незаказ)
     if (dto.statusOrder && (dto.statusOrder === 'Отказ' || dto.statusOrder === 'Незаказ') && order.statusOrder !== dto.statusOrder) {
       this.notificationsService.sendOrderRejectionNotification({
         orderId: updated.id,
@@ -439,9 +482,25 @@ export class OrdersService {
       });
     }
 
-    // 3. Назначение/изменение мастера
+    // 4. Назначение/изменение мастера
     if (dto.masterId !== undefined && order.masterId !== dto.masterId) {
       this.logger.debug(`Master change: old=${order.masterId}, new=${dto.masterId}`);
+      
+      // Если мастер отказывается (masterId был, теперь null)
+      if (order.masterId && dto.masterId === null) {
+        this.logger.debug(`Master ${order.masterId} declined order, notifying director`);
+        this.notificationsService.sendOrderRejectionNotification({
+          orderId: updated.id,
+          city: updated.city,
+          clientName: updated.clientName,
+          phone: updated.phone,
+          reason: 'Мастер отказался от заказа',
+          rk: updated.rk,
+          avitoName: updated.avitoName ?? undefined,
+          typeEquipment: updated.typeEquipment,
+          dateMeeting: updated.dateMeeting.toISOString(),
+        });
+      }
       
       // Если был старый мастер и назначается новый (передача заказа)
       if (order.masterId && dto.masterId) {

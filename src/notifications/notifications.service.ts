@@ -32,6 +32,10 @@ interface OrderRejectionNotification {
   phone: string;
   reason: string;
   masterId?: number;
+  rk?: string;
+  avitoName?: string;
+  typeEquipment?: string;
+  dateMeeting?: string;
 }
 
 interface MasterAssignedNotification {
@@ -48,6 +52,40 @@ interface MasterAssignedNotification {
 interface MasterReassignedNotification {
   orderId: number;
   oldMasterId: number;
+}
+
+interface OrderAcceptedNotification {
+  orderId: number;
+  masterId?: number;
+  rk?: string;
+  avitoName?: string;
+  typeEquipment?: string;
+  clientName?: string;
+  dateMeeting?: string;
+}
+
+interface OrderClosedNotification {
+  orderId: number;
+  masterId?: number;
+  clientName: string;
+  closingDate: string;
+  total?: string;
+  expense?: string;
+  net?: string;
+  handover?: string;
+}
+
+interface OrderInModernNotification {
+  orderId: number;
+  masterId?: number;
+  rk?: string;
+  avitoName?: string;
+  typeEquipment?: string;
+  clientName: string;
+  dateMeeting?: string;
+  prepayment?: string;
+  expectedClosingDate?: string;
+  comment?: string;
 }
 
 @Injectable()
@@ -179,6 +217,75 @@ export class NotificationsService {
       this.logger.log(`✅ Master reassigned notification sent for order #${data.orderId}`);
     } catch (error) {
       this.logger.error(`❌ Failed to send master reassigned notification: ${error.message}`);
+    }
+  }
+
+  /**
+   * Отправка уведомления о принятии заказа мастером
+   */
+  async sendOrderAcceptedNotification(data: OrderAcceptedNotification): Promise<void> {
+    try {
+      await firstValueFrom(
+        this.httpService.post(
+          `${this.notificationsUrl}/notifications/order-accepted`,
+          data,
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Webhook-Token': this.webhookToken,
+            },
+          },
+        ),
+      );
+      this.logger.log(`✅ Order accepted notification sent for order #${data.orderId}`);
+    } catch (error) {
+      this.logger.error(`❌ Failed to send order accepted notification: ${error.message}`);
+    }
+  }
+
+  /**
+   * Отправка уведомления о закрытии заказа
+   */
+  async sendOrderClosedNotification(data: OrderClosedNotification): Promise<void> {
+    try {
+      await firstValueFrom(
+        this.httpService.post(
+          `${this.notificationsUrl}/notifications/order-closed`,
+          data,
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Webhook-Token': this.webhookToken,
+            },
+          },
+        ),
+      );
+      this.logger.log(`✅ Order closed notification sent for order #${data.orderId}`);
+    } catch (error) {
+      this.logger.error(`❌ Failed to send order closed notification: ${error.message}`);
+    }
+  }
+
+  /**
+   * Отправка уведомления о заказе в модерне
+   */
+  async sendOrderInModernNotification(data: OrderInModernNotification): Promise<void> {
+    try {
+      await firstValueFrom(
+        this.httpService.post(
+          `${this.notificationsUrl}/notifications/order-in-modern`,
+          data,
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Webhook-Token': this.webhookToken,
+            },
+          },
+        ),
+      );
+      this.logger.log(`✅ Order in modern notification sent for order #${data.orderId}`);
+    } catch (error) {
+      this.logger.error(`❌ Failed to send order in modern notification: ${error.message}`);
     }
   }
 }
