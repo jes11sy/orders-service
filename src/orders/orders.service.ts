@@ -431,7 +431,7 @@ export class OrdersService {
     if (dto.statusOrder && dto.statusOrder === 'Принял' && order.statusOrder !== 'Принял') {
       this.notificationsService.sendOrderAcceptedNotification({
         orderId: updated.id,
-        masterId: updated.masterId,
+        masterId: updated.masterId || undefined,
         rk: updated.rk,
         avitoName: updated.avitoName ?? undefined,
         typeEquipment: updated.typeEquipment,
@@ -444,7 +444,7 @@ export class OrdersService {
     if (dto.statusOrder && dto.statusOrder === 'Готово' && order.statusOrder !== 'Готово') {
       this.notificationsService.sendOrderClosedNotification({
         orderId: updated.id,
-        masterId: updated.masterId,
+        masterId: updated.masterId || undefined,
         clientName: updated.clientName,
         closingDate: new Date().toISOString(),
         total: updated.result?.toString(),
@@ -458,7 +458,7 @@ export class OrdersService {
     if (dto.statusOrder && dto.statusOrder === 'Модерн' && order.statusOrder !== 'Модерн') {
       this.notificationsService.sendOrderInModernNotification({
         orderId: updated.id,
-        masterId: updated.masterId,
+        masterId: updated.masterId || undefined,
         rk: updated.rk,
         avitoName: updated.avitoName ?? undefined,
         typeEquipment: updated.typeEquipment,
@@ -466,7 +466,7 @@ export class OrdersService {
         dateMeeting: updated.dateMeeting.toISOString(),
         prepayment: updated.prepayment?.toString(),
         expectedClosingDate: updated.dateClosmod?.toISOString(),
-        comment: updated.comment,
+        comment: updated.comment ?? undefined,
       });
     }
 
