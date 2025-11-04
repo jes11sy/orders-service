@@ -420,10 +420,13 @@ export class OrdersService {
       this.notificationsService.sendDateChangeNotification({
         orderId: updated.id,
         city: updated.city,
-        clientName: updated.clientName,
-        newDate: updated.dateMeeting.toISOString(),
-        oldDate: order.dateMeeting.toISOString(),
+        clientName: updated.clientName?.trim() || undefined,
+        newDate: updated.dateMeeting?.toISOString(),
+        oldDate: order.dateMeeting?.toISOString(),
         masterId: updated.masterId || undefined,
+        rk: updated.rk?.trim() || undefined,
+        avitoName: updated.avitoName?.trim() || undefined,
+        typeEquipment: updated.typeEquipment?.trim() || undefined,
       });
     }
 
@@ -432,11 +435,11 @@ export class OrdersService {
       this.notificationsService.sendOrderAcceptedNotification({
         orderId: updated.id,
         masterId: updated.masterId || undefined,
-        rk: updated.rk,
-        avitoName: updated.avitoName ?? undefined,
-        typeEquipment: updated.typeEquipment,
-        clientName: updated.clientName,
-        dateMeeting: updated.dateMeeting.toISOString(),
+        rk: updated.rk?.trim() || undefined,
+        avitoName: updated.avitoName?.trim() || undefined,
+        typeEquipment: updated.typeEquipment?.trim() || undefined,
+        clientName: updated.clientName?.trim() || undefined,
+        dateMeeting: updated.dateMeeting?.toISOString(),
       });
     }
 
@@ -459,14 +462,14 @@ export class OrdersService {
       this.notificationsService.sendOrderInModernNotification({
         orderId: updated.id,
         masterId: updated.masterId || undefined,
-        rk: updated.rk,
-        avitoName: updated.avitoName ?? undefined,
-        typeEquipment: updated.typeEquipment,
-        clientName: updated.clientName,
-        dateMeeting: updated.dateMeeting.toISOString(),
+        rk: updated.rk?.trim() || undefined,
+        avitoName: updated.avitoName?.trim() || undefined,
+        typeEquipment: updated.typeEquipment?.trim() || undefined,
+        clientName: updated.clientName?.trim() || undefined,
+        dateMeeting: updated.dateMeeting?.toISOString(),
         prepayment: updated.prepayment?.toString(),
         expectedClosingDate: updated.dateClosmod?.toISOString(),
-        comment: updated.comment ?? undefined,
+        comment: updated.comment?.trim() || undefined,
       });
     }
 
@@ -492,13 +495,13 @@ export class OrdersService {
         this.notificationsService.sendOrderRejectionNotification({
           orderId: updated.id,
           city: updated.city,
-          clientName: updated.clientName,
+          clientName: updated.clientName?.trim() || undefined,
           phone: updated.phone,
           reason: 'Мастер отказался от заказа',
-          rk: updated.rk,
-          avitoName: updated.avitoName ?? undefined,
-          typeEquipment: updated.typeEquipment,
-          dateMeeting: updated.dateMeeting.toISOString(),
+          rk: updated.rk?.trim() || undefined,
+          avitoName: updated.avitoName?.trim() || undefined,
+          typeEquipment: updated.typeEquipment?.trim() || undefined,
+          dateMeeting: updated.dateMeeting?.toISOString(),
         });
       }
       
@@ -517,12 +520,12 @@ export class OrdersService {
         this.notificationsService.sendMasterAssignedNotification({
           orderId: updated.id,
           masterId: dto.masterId,
-          rk: updated.rk,
-          avitoName: updated.avitoName ?? undefined,
-          typeEquipment: updated.typeEquipment,
-          clientName: updated.clientName,
-          address: updated.address,
-          dateMeeting: updated.dateMeeting.toISOString(),
+          rk: updated.rk?.trim() || undefined,
+          avitoName: updated.avitoName?.trim() || undefined,
+          typeEquipment: updated.typeEquipment?.trim() || undefined,
+          clientName: updated.clientName?.trim() || undefined,
+          address: updated.address?.trim() || undefined,
+          dateMeeting: updated.dateMeeting?.toISOString(),
         });
       }
     }

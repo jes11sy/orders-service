@@ -19,16 +19,19 @@ interface NewOrderNotification {
 interface DateChangeNotification {
   orderId: number;
   city: string;
-  clientName: string;
-  newDate: string;
+  clientName?: string;
+  newDate?: string;
   oldDate?: string;
   masterId?: number;
+  rk?: string;
+  avitoName?: string;
+  typeEquipment?: string;
 }
 
 interface OrderRejectionNotification {
   orderId: number;
   city: string;
-  clientName: string;
+  clientName?: string;
   phone: string;
   reason: string;
   masterId?: number;
@@ -67,8 +70,8 @@ interface OrderAcceptedNotification {
 interface OrderClosedNotification {
   orderId: number;
   masterId?: number;
-  clientName: string;
-  closingDate: string;
+  clientName?: string;
+  closingDate?: string;
   total?: string;
   expense?: string;
   net?: string;
@@ -81,7 +84,7 @@ interface OrderInModernNotification {
   rk?: string;
   avitoName?: string;
   typeEquipment?: string;
-  clientName: string;
+  clientName?: string;
   dateMeeting?: string;
   prepayment?: string;
   expectedClosingDate?: string;
