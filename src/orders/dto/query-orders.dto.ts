@@ -56,5 +56,35 @@ export class QueryOrdersDto {
   @IsOptional()
   @IsString()
   closingDate?: string;
+
+  @ApiPropertyOptional({ description: 'РК (рекламная кампания)' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  @Transform(({ value }) => value?.trim())
+  rk?: string;
+
+  @ApiPropertyOptional({ description: 'Направление (тип оборудования)' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  @Transform(({ value }) => value?.trim())
+  typeEquipment?: string;
+
+  @ApiPropertyOptional({ description: 'Тип даты для фильтра (create - создания, close - закрытия)', enum: ['create', 'close'] })
+  @IsOptional()
+  @IsString()
+  @IsIn(['create', 'close'])
+  dateType?: 'create' | 'close';
+
+  @ApiPropertyOptional({ description: 'Дата от (формат YYYY-MM-DD)' })
+  @IsOptional()
+  @IsString()
+  dateFrom?: string;
+
+  @ApiPropertyOptional({ description: 'Дата до (формат YYYY-MM-DD)' })
+  @IsOptional()
+  @IsString()
+  dateTo?: string;
 }
 

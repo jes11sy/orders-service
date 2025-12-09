@@ -24,7 +24,7 @@ export class OrdersService {
 
   // ✅ ИСПРАВЛЕНИЕ: Строгая типизация вместо any
   async getOrders(query: QueryOrdersDto, user: AuthUser) {
-    const { page = 1, limit = 50, status, city, search, masterId, master, closingDate } = query;
+    const { page = 1, limit = 50, status, city, search, masterId, master, closingDate, rk, typeEquipment, dateType, dateFrom, dateTo } = query;
     const skip = (page - 1) * limit;
 
     const where: any = {};
@@ -45,6 +45,16 @@ export class OrdersService {
     if (city) where.city = city;
     if (masterId) where.masterId = +masterId;
     
+    // Фильтр по РК
+    if (rk) {
+      where.rk = rk;
+    }
+    
+    // Фильтр по направлению (тип оборудования)
+    if (typeEquipment) {
+      where.typeEquipment = typeEquipment;
+    }
+    
     // Фильтр по имени мастера
     if (master) {
       where.master = {
@@ -52,7 +62,7 @@ export class OrdersService {
       };
     }
     
-    // Фильтр по дате закрытия
+    // Фильтр по дате закрытия (старый параметр для обратной совместимости)
     if (closingDate) {
       const date = new Date(closingDate);
       const nextDay = new Date(date);
@@ -62,6 +72,26 @@ export class OrdersService {
         gte: date,
         lt: nextDay
       };
+    }
+    
+    // Новый фильтр по диапазону дат
+    if (dateFrom || dateTo) {
+      const dateField = dateType === 'close' ? 'closingData' : 'createDate';
+      const dateFilter: any = {};
+      
+      if (dateFrom) {
+        const fromDate = new Date(dateFrom);
+        fromDate.setHours(0, 0, 0, 0);
+        dateFilter.gte = fromDate;
+      }
+      
+      if (dateTo) {
+        const toDate = new Date(dateTo);
+        toDate.setHours(23, 59, 59, 999);
+        dateFilter.lte = toDate;
+      }
+      
+      where[dateField] = dateFilter;
     }
     
     if (search) {
@@ -725,6 +755,39 @@ export class OrdersService {
         this.logger.error(`Failed to update error status: ${updateError instanceof Error ? updateError.message : 'Unknown'}`);
       }
     }
+  }
+
+  async getFilterOptions(user: AuthUser) {
+    const where: any = {};
+
+    // RBAC фильтры
+    if (user.role === 'master') {
+      where.masterId = user.userId;
+    }
+
+    if (user.role === 'director' && user.cities) {
+      where.city = { in: user.cities };
+    }
+
+    // Получаем уникальные значения РК и направлений
+    const orders = await this.prisma.order.findMany({
+      where,
+      select: {
+        rk: true,
+        typeEquipment: true,
+      },
+    });
+
+    const rks = [...new Set(orders.map(o => o.rk).filter(Boolean))].sort();
+    const typeEquipments = [...new Set(orders.map(o => o.typeEquipment).filter(Boolean))].sort();
+
+    return {
+      success: true,
+      data: {
+        rks,
+        typeEquipments,
+      },
+    };
   }
 
   async submitCashForReview(orderId: number, cashReceiptDoc: string | undefined, user: AuthUser) {

@@ -142,6 +142,14 @@ export class OrdersController {
     };
   }
 
+  @Get('filter-options')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get filter options (RKs, typeEquipments)' })
+  async getFilterOptions(@Request() req: AuthenticatedRequest) {
+    return this.ordersService.getFilterOptions(req.user);
+  }
+
   @Get(':id/avito-chat')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @ApiBearerAuth()
