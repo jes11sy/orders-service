@@ -76,7 +76,18 @@ export class OrdersService {
     
     // Новый фильтр по диапазону дат
     if (dateFrom || dateTo) {
-      const dateField = dateType === 'close' ? 'closingData' : 'createDate';
+      let dateField: string;
+      switch (dateType) {
+        case 'close':
+          dateField = 'closingData';
+          break;
+        case 'meeting':
+          dateField = 'dateMeeting';
+          break;
+        default:
+          dateField = 'createDate';
+      }
+      
       const dateFilter: any = {};
       
       if (dateFrom) {

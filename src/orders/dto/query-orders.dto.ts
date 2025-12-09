@@ -71,11 +71,11 @@ export class QueryOrdersDto {
   @Transform(({ value }) => value?.trim())
   typeEquipment?: string;
 
-  @ApiPropertyOptional({ description: 'Тип даты для фильтра (create - создания, close - закрытия)', enum: ['create', 'close'] })
+  @ApiPropertyOptional({ description: 'Тип даты для фильтра (create - создания, close - закрытия, meeting - встречи)', enum: ['create', 'close', 'meeting'] })
   @IsOptional()
   @IsString()
-  @IsIn(['create', 'close'])
-  dateType?: 'create' | 'close';
+  @IsIn(['create', 'close', 'meeting'])
+  dateType?: 'create' | 'close' | 'meeting';
 
   @ApiPropertyOptional({ description: 'Дата от (формат YYYY-MM-DD)' })
   @IsOptional()
