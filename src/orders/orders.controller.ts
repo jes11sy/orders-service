@@ -9,6 +9,7 @@ import { UpdateOrderDto } from './dto/update-order.dto';
 import { QueryOrdersDto } from './dto/query-orders.dto';
 import { RolesGuard, Roles, UserRole } from '../auth/roles.guard';
 import { AuthUser } from '../types/auth-user.type';
+import { PrismaService } from '../prisma/prisma.service';
 
 // ✅ ИСПРАВЛЕНИЕ: Типизированный Request
 interface AuthenticatedRequest {
@@ -21,16 +22,41 @@ interface AuthenticatedRequest {
 export class OrdersController {
   private readonly logger = new Logger(OrdersController.name);
 
-  constructor(private ordersService: OrdersService) {}
+  constructor(
+    private ordersService: OrdersService,
+    private prismaService: PrismaService,
+  ) {}
 
   @Get('health')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Health check endpoint' })
   async health() {
+    const dbHealth = await this.prismaService.healthCheck();
+    
     return {
       success: true,
       message: 'Orders Service is healthy',
       timestamp: new Date().toISOString(),
+      database: {
+        healthy: dbHealth.healthy,
+        latency_ms: dbHealth.latency,
+      },
+    };
+  }
+
+  @Get('metrics')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Get database connection pool metrics' })
+  async metrics() {
+    const poolMetrics = this.prismaService.getPoolMetrics();
+    
+    return {
+      success: true,
+      data: {
+        service: 'orders-service',
+        timestamp: new Date().toISOString(),
+        database: poolMetrics,
+      },
     };
   }
 
