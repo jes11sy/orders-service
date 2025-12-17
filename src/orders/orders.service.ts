@@ -428,6 +428,10 @@ export class OrdersService {
     if (dto.cashSubmissionStatus !== undefined && dto.cashSubmissionStatus !== null) updateData.cashSubmissionStatus = dto.cashSubmissionStatus;
     if (dto.cashSubmissionAmount !== undefined && dto.cashSubmissionAmount !== null) updateData.cashSubmissionAmount = dto.cashSubmissionAmount;
     
+    // Поля партнера
+    if (dto.partner !== undefined) updateData.partner = dto.partner;
+    if (dto.partnerPercent !== undefined && dto.partnerPercent !== null) updateData.partnerPercent = dto.partnerPercent;
+    
     // Обрабатываем даты отдельно
     if (dto.dateMeeting !== undefined && dto.dateMeeting !== null) {
       updateData.dateMeeting = dto.dateMeeting ? new Date(dto.dateMeeting) : null;

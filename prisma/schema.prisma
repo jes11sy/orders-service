@@ -43,6 +43,9 @@ model Order {
   cashSubmissionDate   DateTime? @map("cash_submission_date")
   cashSubmissionAmount Decimal?  @map("cash_submission_amount") @db.Decimal(10, 2)
   cashReceiptDoc       String?   @map("cash_receipt_doc")
+  
+  partner              Boolean?  @default(false)
+  partnerPercent       Decimal?  @map("partner_percent") @db.Decimal(5, 2)
 
   operator CallcentreOperator @relation(fields: [operatorNameId], references: [id])
   master   Master?             @relation(fields: [masterId], references: [id])

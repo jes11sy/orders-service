@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNumber, IsDateString, MaxLength, Matches, IsIn, Min, Max, ValidateIf } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsDateString, MaxLength, Matches, IsIn, Min, Max, ValidateIf, IsBoolean } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 
@@ -193,5 +193,18 @@ export class UpdateOrderDto {
   @Min(0)
   @Max(999999)
   cashSubmissionAmount?: number;
+
+  @ApiProperty({ required: false, description: 'Партнер' })
+  @IsBoolean()
+  @IsOptional()
+  partner?: boolean;
+
+  @ApiProperty({ required: false, description: 'Процент партнера' })
+  @Type(() => Number)
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  @Max(100)
+  partnerPercent?: number;
 }
 
