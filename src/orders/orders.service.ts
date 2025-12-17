@@ -918,17 +918,18 @@ export class OrdersService {
     }
 
     const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+    const additionalWhere = whereConditions.length > 0 ? 'AND' : 'WHERE';
 
     // ✅ ОПТИМИЗАЦИЯ: Получаем уникальные значения через DISTINCT прямо в БД
     const [rksResult, typeEquipmentsResult] = await Promise.all([
       // Уникальные РК
       this.prisma.$queryRawUnsafe<Array<{ rk: string }>>(
-        `SELECT DISTINCT rk FROM orders ${whereClause} AND rk IS NOT NULL ORDER BY rk ASC`,
+        `SELECT DISTINCT rk FROM orders ${whereClause} ${additionalWhere} rk IS NOT NULL ORDER BY rk ASC`,
         ...params
       ),
       // Уникальные типы оборудования
       this.prisma.$queryRawUnsafe<Array<{ type_equipment: string }>>(
-        `SELECT DISTINCT type_equipment FROM orders ${whereClause} AND type_equipment IS NOT NULL ORDER BY type_equipment ASC`,
+        `SELECT DISTINCT type_equipment FROM orders ${whereClause} ${additionalWhere} type_equipment IS NOT NULL ORDER BY type_equipment ASC`,
         ...params
       ),
     ]);
