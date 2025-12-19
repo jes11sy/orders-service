@@ -13,11 +13,25 @@ async function bootstrap() {
 
   const logger = new Logger('OrdersService');
 
+  // 🍪 РЕГИСТРАЦИЯ COOKIE PLUGIN (до CORS!)
+  await app.register(require('@fastify/cookie'), {
+    secret: process.env.COOKIE_SECRET || process.env.JWT_SECRET,
+  });
+  logger.log('✅ Cookie plugin registered');
+
   // ✅ ИСПРАВЛЕНИЕ: CORS с безопасным fallback
   const allowedOrigins = process.env.CORS_ORIGIN?.split(',').map(o => o.trim()) || ['http://localhost:3000'];
   await app.register(require('@fastify/cors'), {
     origin: allowedOrigins,
     credentials: true,
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'Accept',
+      'Origin',
+      'X-Use-Cookies', // 🍪 Поддержка cookie mode
+    ],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   });
   logger.log(`CORS enabled for: ${allowedOrigins.join(', ')}`);
 
