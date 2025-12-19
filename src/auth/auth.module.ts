@@ -4,6 +4,7 @@ import { PassportModule } from '@nestjs/passport';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtStrategy } from './jwt.strategy';
 import { RolesGuard } from './roles.guard';
+import { CookieJwtAuthGuard } from './guards/cookie-jwt-auth.guard';
 
 @Module({
   imports: [
@@ -17,8 +18,8 @@ import { RolesGuard } from './roles.guard';
       }),
     }),
   ],
-  providers: [JwtStrategy, RolesGuard],
-  exports: [RolesGuard],
+  providers: [JwtStrategy, RolesGuard, CookieJwtAuthGuard],
+  exports: [RolesGuard, CookieJwtAuthGuard],
 })
 export class AuthModule {}
 

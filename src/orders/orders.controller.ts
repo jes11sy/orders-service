@@ -1,6 +1,6 @@
 import { Controller, Get, Post, Put, Patch, Body, Param, Query, UseGuards, Request, HttpCode, HttpStatus, Logger, BadRequestException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
-import { AuthGuard } from '@nestjs/passport';
+import { CookieJwtAuthGuard } from '../auth/guards/cookie-jwt-auth.guard';
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { CreateOrderFromCallDto } from './dto/create-order-from-call.dto';
@@ -61,7 +61,7 @@ export class OrdersController {
   }
 
   @Get()
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @UseGuards(CookieJwtAuthGuard, RolesGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get all orders with filters' })
   async getOrders(@Query() query: QueryOrdersDto, @Request() req: AuthenticatedRequest) {
@@ -69,7 +69,7 @@ export class OrdersController {
   }
 
   @Post()
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @UseGuards(CookieJwtAuthGuard, RolesGuard)
   @ApiBearerAuth()
   @Roles(UserRole.operator)
   @ApiOperation({ summary: 'Create new order' })
@@ -87,7 +87,7 @@ export class OrdersController {
   }
 
   @Post('from-call')
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @UseGuards(CookieJwtAuthGuard, RolesGuard)
   @ApiBearerAuth()
   @Roles(UserRole.operator)
   @ApiOperation({ summary: 'Create order from call' })
@@ -96,7 +96,7 @@ export class OrdersController {
   }
 
   @Post('from-chat')
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @UseGuards(CookieJwtAuthGuard, RolesGuard)
   @ApiBearerAuth()
   @Roles(UserRole.operator)
   @ApiOperation({ summary: 'Create order from chat' })
@@ -114,7 +114,7 @@ export class OrdersController {
   }
 
   @Get(':id')
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @UseGuards(CookieJwtAuthGuard, RolesGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get order by ID' })
   async getOrder(@Param('id') id: string, @Request() req: AuthenticatedRequest) {
@@ -122,7 +122,7 @@ export class OrdersController {
   }
 
   @Put(':id')
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @UseGuards(CookieJwtAuthGuard, RolesGuard)
   @ApiBearerAuth()
   @Roles(UserRole.operator, UserRole.director, UserRole.master)
   @ApiOperation({ summary: 'Update order (operator, director, master)' })
@@ -131,7 +131,7 @@ export class OrdersController {
   }
 
   @Patch(':id/status')
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @UseGuards(CookieJwtAuthGuard, RolesGuard)
   @ApiBearerAuth()
   @Roles(UserRole.operator, UserRole.director, UserRole.master)
   @ApiOperation({ summary: 'Update order status' })
@@ -140,7 +140,7 @@ export class OrdersController {
   }
 
   @Patch(':id/master')
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @UseGuards(CookieJwtAuthGuard, RolesGuard)
   @ApiBearerAuth()
   @Roles(UserRole.operator, UserRole.director)
   @ApiOperation({ summary: 'Assign master to order' })
@@ -149,7 +149,7 @@ export class OrdersController {
   }
 
   @Get('statuses')
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @UseGuards(CookieJwtAuthGuard, RolesGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get available order statuses' })
   async getOrderStatuses() {
@@ -169,7 +169,7 @@ export class OrdersController {
   }
 
   @Get('filter-options')
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @UseGuards(CookieJwtAuthGuard, RolesGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get filter options (RKs, typeEquipments)' })
   async getFilterOptions(@Request() req: AuthenticatedRequest) {
@@ -177,7 +177,7 @@ export class OrdersController {
   }
 
   @Get(':id/avito-chat')
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @UseGuards(CookieJwtAuthGuard, RolesGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get Avito chat info for order' })
   async getOrderAvitoChat(@Param('id') id: string, @Request() req: AuthenticatedRequest) {
@@ -185,7 +185,7 @@ export class OrdersController {
   }
 
   @Patch(':id/submit-cash')
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @UseGuards(CookieJwtAuthGuard, RolesGuard)
   @ApiBearerAuth()
   @Roles(UserRole.master)
   @ApiOperation({ summary: 'Submit cash for review' })
