@@ -820,15 +820,30 @@ export class OrdersService {
       
       // Добавляем receiptDoc только если он есть
       // Извлекаем путь из URL (убираем домен и query параметры)
+      // ✅ ИСПРАВЛЕНИЕ: bsoDoc может быть массивом строк
       if (order.bsoDoc) {
         try {
-          const url = new URL(order.bsoDoc);
-          // Получаем путь без начального слеша (например: director/orders/bso_doc/file.jpg)
-          const path = url.pathname.startsWith('/') ? url.pathname.substring(1) : url.pathname;
-          cashData.receiptDoc = path;
+          // Если bsoDoc это массив, берем первый элемент
+          const bsoDocValue = Array.isArray(order.bsoDoc) 
+            ? (order.bsoDoc.length > 0 ? order.bsoDoc[0] : null)
+            : order.bsoDoc;
+          
+          if (bsoDocValue) {
+            // Пытаемся создать URL из строки
+            const url = new URL(bsoDocValue);
+            // Получаем путь без начального слеша (например: director/orders/bso_doc/file.jpg)
+            const path = url.pathname.startsWith('/') ? url.pathname.substring(1) : url.pathname;
+            cashData.receiptDoc = path;
+          }
         } catch (e) {
-          // Если не URL, а просто путь - используем как есть
-          cashData.receiptDoc = order.bsoDoc;
+          // Если не URL, а просто путь - используем как есть (только если это строка)
+          const bsoDocValue = Array.isArray(order.bsoDoc) 
+            ? (order.bsoDoc.length > 0 ? order.bsoDoc[0] : null)
+            : order.bsoDoc;
+          
+          if (bsoDocValue && typeof bsoDocValue === 'string') {
+            cashData.receiptDoc = bsoDocValue;
+          }
         }
       }
 
