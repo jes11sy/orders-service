@@ -1,25 +1,26 @@
 import { Injectable, NestMiddleware, Logger } from '@nestjs/common';
-import { Request, Response, NextFunction } from 'express';
+import { FastifyRequest, FastifyReply } from 'fastify';
 
 /**
- * Middleware для логирования всех входящих запросов
+ * Middleware для логирования всех входящих запросов (Fastify)
  * Помогает отследить какие endpoint'ы вызываются и сколько времени они занимают
  */
 @Injectable()
 export class RequestLoggerMiddleware implements NestMiddleware {
   private readonly logger = new Logger('HTTP');
 
-  use(req: Request, res: Response, next: NextFunction) {
-    const { method, originalUrl, ip } = req;
-    const userAgent = req.get('user-agent') || '';
+  use(req: FastifyRequest['raw'], res: FastifyReply['raw'], next: () => void) {
+    const { method, url } = req;
+    const ip = (req as any).ip || req.socket.remoteAddress || 'unknown';
+    const userAgent = req.headers['user-agent'] || '';
     const startTime = Date.now();
 
     // Логируем начало запроса
-    this.logger.log(`→ ${method} ${originalUrl} [${ip}]`);
+    this.logger.log(`→ ${method} ${url} [${ip}]`);
 
     // Перехватываем завершение ответа
     res.on('finish', () => {
-      const { statusCode } = res;
+      const statusCode = res.statusCode;
       const duration = Date.now() - startTime;
       
       // Логируем результат с цветовым кодированием
@@ -27,17 +28,17 @@ export class RequestLoggerMiddleware implements NestMiddleware {
       const emoji = statusCode >= 500 ? '🔴' : statusCode >= 400 ? '⚠️' : '✅';
       
       this.logger[logLevel](
-        `${emoji} ${method} ${originalUrl} ${statusCode} - ${duration}ms`
+        `${emoji} ${method} ${url} ${statusCode} - ${duration}ms`
       );
 
       // Предупреждение о медленных запросах (>3 секунды)
       if (duration > 3000) {
-        this.logger.warn(`🐌 SLOW REQUEST: ${method} ${originalUrl} took ${duration}ms`);
+        this.logger.warn(`🐌 SLOW REQUEST: ${method} ${url} took ${duration}ms`);
       }
 
       // Критическое предупреждение о ОЧЕНЬ медленных запросах (>10 секунд)
       if (duration > 10000) {
-        this.logger.error(`🚨 CRITICAL SLOW REQUEST: ${method} ${originalUrl} took ${duration}ms`);
+        this.logger.error(`🚨 CRITICAL SLOW REQUEST: ${method} ${url} took ${duration}ms`);
       }
     });
 
