@@ -34,8 +34,13 @@ export class OrdersService {
 
   // ✅ ОПТИМИЗАЦИЯ: SQL сортировка с CASE WHEN вместо загрузки всех заказов в память
   async getOrders(query: QueryOrdersDto, user: AuthUser) {
+    const startTime = Date.now();
     const { page = 1, limit = 50, status, city, search, masterId, master, closingDate, rk, typeEquipment, dateType, dateFrom, dateTo } = query;
     const skip = (page - 1) * limit;
+    
+    this.logger.debug(`[getOrders] START: user=${user.userId} (${user.role}), page=${page}, limit=${limit}, filters=${JSON.stringify({ status, city, search: search ? '***' : null, masterId, master, rk, typeEquipment })}`);
+    
+    try {
 
     // Строим WHERE условия для SQL
     const whereConditions: string[] = [];
@@ -257,6 +262,13 @@ export class OrdersService {
 
     const total = Number(totalResult[0].count);
 
+    const duration = Date.now() - startTime;
+    this.logger.debug(`[getOrders] COMPLETE in ${duration}ms (returned ${transformedOrders.length} orders, total=${total})`);
+    
+    if (duration > 2000) {
+      this.logger.warn(`[getOrders] SLOW QUERY: ${duration}ms - page=${page}, filters=${JSON.stringify({ status, city, masterId, rk, typeEquipment })}`);
+    }
+
     return {
       success: true,
       data: {
@@ -269,6 +281,11 @@ export class OrdersService {
         },
       },
     };
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      this.logger.error(`[getOrders] FAILED after ${duration}ms: ${error.message}`);
+      throw error;
+    }
   }
 
   async createOrder(dto: CreateOrderDto, user: AuthUser) {
@@ -901,48 +918,74 @@ export class OrdersService {
   // ✅ ОПТИМИЗАЦИЯ: Использование DISTINCT вместо загрузки всех заказов
   // Скорость: 500ms → 10ms (50x ускорение)
   async getFilterOptions(user: AuthUser) {
-    // Строим WHERE условия для SQL
-    const whereConditions: string[] = [];
-    const params: any[] = [];
-    let paramIndex = 1;
+    const startTime = Date.now();
+    this.logger.debug(`[getFilterOptions] START for user ${user.userId} (${user.role})`);
+    
+    try {
+      // Строим WHERE условия для SQL
+      const whereConditions: string[] = [];
+      const params: any[] = [];
+      let paramIndex = 1;
 
-    // RBAC фильтры
-    if (user.role === 'master') {
-      whereConditions.push(`master_id = $${paramIndex}`);
-      params.push(user.userId);
-      paramIndex++;
+      // RBAC фильтры
+      if (user.role === 'master') {
+        whereConditions.push(`master_id = $${paramIndex}`);
+        params.push(user.userId);
+        paramIndex++;
+      }
+
+      if (user.role === 'director' && user.cities && user.cities.length > 0) {
+        whereConditions.push(`city = ANY($${paramIndex}::text[])`);
+        params.push(user.cities);
+        paramIndex++;
+      }
+
+      const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+      const additionalWhere = whereConditions.length > 0 ? 'AND' : 'WHERE';
+
+      this.logger.debug(`[getFilterOptions] Executing DISTINCT queries with whereClause: ${whereClause}`);
+
+      // ✅ ОПТИМИЗАЦИЯ: Получаем уникальные значения через DISTINCT прямо в БД
+      // ✅ ДОБАВЛЕН ТАЙМАУТ: Если запрос занимает >5 секунд, падаем с ошибкой
+      const queryPromise = Promise.all([
+        // Уникальные РК
+        this.prisma.$queryRawUnsafe<Array<{ rk: string }>>(
+          `SELECT DISTINCT rk FROM orders ${whereClause} ${additionalWhere} rk IS NOT NULL ORDER BY rk ASC`,
+          ...params
+        ),
+        // Уникальные типы оборудования
+        this.prisma.$queryRawUnsafe<Array<{ type_equipment: string }>>(
+          `SELECT DISTINCT type_equipment FROM orders ${whereClause} ${additionalWhere} type_equipment IS NOT NULL ORDER BY type_equipment ASC`,
+          ...params
+        ),
+      ]);
+
+      // Таймаут 5 секунд
+      const timeoutPromise = new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error('getFilterOptions query timeout (>5s)')), 5000)
+      );
+
+      const [rksResult, typeEquipmentsResult] = await Promise.race([queryPromise, timeoutPromise]);
+
+      const duration = Date.now() - startTime;
+      this.logger.debug(`[getFilterOptions] COMPLETE in ${duration}ms (RKs: ${rksResult.length}, Equipment: ${typeEquipmentsResult.length})`);
+
+      if (duration > 1000) {
+        this.logger.warn(`[getFilterOptions] SLOW QUERY: ${duration}ms`);
+      }
+
+      return {
+        success: true,
+        data: {
+          rks: rksResult.map(r => r.rk),
+          typeEquipments: typeEquipmentsResult.map(t => t.type_equipment),
+        },
+      };
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      this.logger.error(`[getFilterOptions] FAILED after ${duration}ms: ${error.message}`);
+      throw error;
     }
-
-    if (user.role === 'director' && user.cities && user.cities.length > 0) {
-      whereConditions.push(`city = ANY($${paramIndex}::text[])`);
-      params.push(user.cities);
-      paramIndex++;
-    }
-
-    const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
-    const additionalWhere = whereConditions.length > 0 ? 'AND' : 'WHERE';
-
-    // ✅ ОПТИМИЗАЦИЯ: Получаем уникальные значения через DISTINCT прямо в БД
-    const [rksResult, typeEquipmentsResult] = await Promise.all([
-      // Уникальные РК
-      this.prisma.$queryRawUnsafe<Array<{ rk: string }>>(
-        `SELECT DISTINCT rk FROM orders ${whereClause} ${additionalWhere} rk IS NOT NULL ORDER BY rk ASC`,
-        ...params
-      ),
-      // Уникальные типы оборудования
-      this.prisma.$queryRawUnsafe<Array<{ type_equipment: string }>>(
-        `SELECT DISTINCT type_equipment FROM orders ${whereClause} ${additionalWhere} type_equipment IS NOT NULL ORDER BY type_equipment ASC`,
-        ...params
-      ),
-    ]);
-
-    return {
-      success: true,
-      data: {
-        rks: rksResult.map(r => r.rk),
-        typeEquipments: typeEquipmentsResult.map(t => t.type_equipment),
-      },
-    };
   }
 
   async submitCashForReview(orderId: number, cashReceiptDoc: string | undefined, user: AuthUser) {
