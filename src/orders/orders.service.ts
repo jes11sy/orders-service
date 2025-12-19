@@ -9,7 +9,7 @@ import { QueryOrdersDto } from './dto/query-orders.dto';
 import { UserRole } from '../auth/roles.guard';
 import { AuthUser } from '../types/auth-user.type';
 import { maskSensitiveData, getFieldNames } from '../utils/masking.util';
-import { firstValueFrom, timeout, catchError, retry } from 'rxjs';
+import { firstValueFrom, timeout, catchError } from 'rxjs';
 import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
@@ -891,10 +891,46 @@ export class OrdersService {
             headers,
             timeout: 3000, // ✅ Таймаут 3 секунды
             maxRedirects: 0, // ✅ Без редиректов
+            validateStatus: (status) => status >= 200 && status < 300, // ✅ Только 2xx считаем успехом
           }
         ).pipe(
           timeout(3000), // ✅ RxJS таймаут 3 секунды
-          // ✅ УБРАЛИ retry - не блокируем event loop
+          catchError((error) => {
+            // ✅ ЗАЩИТА: Ловим HTML ответы и другие ошибки
+            const httpDuration = Date.now() - httpStartTime;
+            
+            if (error.response) {
+              const contentType = error.response.headers['content-type'] || '';
+              const statusCode = error.response.status;
+              const data = error.response.data;
+              
+              // Если получили HTML вместо JSON
+              if (contentType.includes('text/html')) {
+                const htmlPreview = typeof data === 'string' ? data.substring(0, 100) : String(data).substring(0, 100);
+                this.logger.error(`[syncCashReceipt] ❌ Received HTML instead of JSON from cash-service (${statusCode}): ${htmlPreview}...`);
+                throw new Error(`Cash service returned HTML error (${statusCode})`);
+              }
+              
+              // Другие HTTP ошибки
+              this.logger.error(`[syncCashReceipt] ❌ HTTP ${statusCode} from cash-service after ${httpDuration}ms: ${JSON.stringify(data).substring(0, 200)}`);
+              throw new Error(`Cash service error: ${statusCode}`);
+            }
+            
+            // Таймаут или network error
+            if (error.code === 'ECONNREFUSED') {
+              this.logger.error(`[syncCashReceipt] ❌ Cannot connect to cash-service at ${cashServiceUrl}`);
+              throw new Error('Cash service unavailable');
+            }
+            
+            if (error.name === 'TimeoutError') {
+              this.logger.error(`[syncCashReceipt] ❌ Timeout (>3s) waiting for cash-service`);
+              throw new Error('Cash service timeout');
+            }
+            
+            // Прочие ошибки
+            this.logger.error(`[syncCashReceipt] ❌ Unknown error after ${httpDuration}ms: ${error.message}`);
+            throw error;
+          })
         )
       );
 
