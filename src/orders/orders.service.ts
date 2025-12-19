@@ -820,6 +820,9 @@ export class OrdersService {
     user: AuthUser, 
     requestHeaders?: Record<string, string | string[] | undefined>
   ) {
+    const startTime = Date.now();
+    this.logger.debug(`[syncCashReceipt] START for order #${order.id}`);
+    
     try {
       const cashServiceUrl = process.env.CASH_SERVICE_URL || 'http://cash-service.backend.svc.cluster.local:5006';
       
@@ -835,23 +838,33 @@ export class OrdersService {
         paymentPurpose: `Заказ №${order.id}`,
       };
       
+      // ✅ ЗАЩИТА: Проверяем тип bsoDoc перед обработкой
+      this.logger.debug(`[syncCashReceipt] Order #${order.id} bsoDoc type: ${typeof order.bsoDoc}, isArray: ${Array.isArray(order.bsoDoc)}, value: ${JSON.stringify(order.bsoDoc)}`);
+      
       // Добавляем receiptDoc только если он есть
       // Извлекаем путь из URL (убираем домен и query параметры)
       // bsoDoc теперь массив, берем первый элемент если есть
       if (order.bsoDoc && Array.isArray(order.bsoDoc) && order.bsoDoc.length > 0) {
         try {
           const firstDoc = order.bsoDoc[0];
-          const url = new URL(firstDoc);
-          // Получаем путь без начального слеша (например: director/orders/bso_doc/file.jpg)
-          const path = url.pathname.startsWith('/') ? url.pathname.substring(1) : url.pathname;
-          cashData.receiptDoc = path;
+          
+          // ✅ ЗАЩИТА: Проверяем что firstDoc это строка
+          if (typeof firstDoc !== 'string') {
+            this.logger.warn(`[syncCashReceipt] Order #${order.id} bsoDoc[0] is not a string: ${typeof firstDoc}`);
+          } else {
+            this.logger.debug(`[syncCashReceipt] Processing firstDoc: ${firstDoc}`);
+            
+            const url = new URL(firstDoc);
+            // Получаем путь без начального слеша (например: director/orders/bso_doc/file.jpg)
+            const path = url.pathname.startsWith('/') ? url.pathname.substring(1) : url.pathname;
+            cashData.receiptDoc = path;
+          }
         } catch (e) {
           // Если не URL, а просто путь - используем как есть
+          this.logger.debug(`[syncCashReceipt] Not a URL, using as path: ${order.bsoDoc[0]}`);
           cashData.receiptDoc = order.bsoDoc[0];
         }
       }
-
-      this.logger.debug(`Sending cash receipt to cash-service for order #${order.id}`);
 
       // Получаем JWT токен из заголовков запроса
       const authHeader = requestHeaders?.authorization || requestHeaders?.Authorization;
@@ -862,31 +875,34 @@ export class OrdersService {
       if (authHeader) {
         headers['Authorization'] = Array.isArray(authHeader) ? authHeader[0] : authHeader;
       } else {
-        this.logger.warn(`No Authorization header found for order #${order.id}`);
+        this.logger.warn(`[syncCashReceipt] No Authorization header found for order #${order.id}`);
       }
 
-      // ✅ ОПТИМИЗАЦИЯ: Отправляем запрос к cash-service с таймаутом, retry и обработкой ошибок
+      this.logger.debug(`[syncCashReceipt] Sending HTTP POST to ${cashServiceUrl}/api/v1/cash for order #${order.id}`);
+      const httpStartTime = Date.now();
+
+      // ✅ ИСПРАВЛЕНО: Убрали retry - если падает, пусть падает быстро
+      // Уменьшили таймаут до 3 секунд
       const response = await firstValueFrom(
         this.httpService.post(
           `${cashServiceUrl}/api/v1/cash`,
           cashData,
           { 
             headers,
-            timeout: 5000, // ✅ Таймаут 5 секунд (вместо 60s по умолчанию)
-            maxRedirects: 2, // ✅ Максимум 2 редиректа
+            timeout: 3000, // ✅ Таймаут 3 секунды
+            maxRedirects: 0, // ✅ Без редиректов
           }
         ).pipe(
-          timeout(5000), // ✅ Дополнительный RxJS таймаут (запасной)
-          retry({
-            count: 2, // ✅ Повторить 2 раза при ошибке
-            delay: 1000, // ✅ Задержка 1 секунда между попытками
-          })
+          timeout(3000), // ✅ RxJS таймаут 3 секунды
+          // ✅ УБРАЛИ retry - не блокируем event loop
         )
       );
 
-      this.logger.log(`✅ Cash synced for order #${order.id}`);
+      const httpDuration = Date.now() - httpStartTime;
+      this.logger.log(`[syncCashReceipt] ✅ Cash synced for order #${order.id} in ${httpDuration}ms`);
       
       // Обновляем статус подачи кассы в заказе
+      this.logger.debug(`[syncCashReceipt] Updating order #${order.id} status in DB`);
       await this.prisma.order.update({
         where: { id: order.id },
         data: {
@@ -896,9 +912,13 @@ export class OrdersService {
         },
       });
 
+      const totalDuration = Date.now() - startTime;
+      this.logger.debug(`[syncCashReceipt] COMPLETE for order #${order.id} in ${totalDuration}ms`);
+
     } catch (error) {
+      const totalDuration = Date.now() - startTime;
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      this.logger.error(`Failed to sync cash for order #${order.id}: ${errorMessage}`);
+      this.logger.error(`[syncCashReceipt] FAILED for order #${order.id} after ${totalDuration}ms: ${errorMessage}`);
       
       // ✅ ИСПРАВЛЕНИЕ: Не бросаем исключение (fire-and-forget)
       try {
