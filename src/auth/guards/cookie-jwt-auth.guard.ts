@@ -20,25 +20,25 @@ export class CookieJwtAuthGuard extends AuthGuard('jwt') {
     // Пытаемся получить токен из cookies
     let cookieToken: string | null = null;
     
-    // Проверяем наличие cookies в request (NestJS abstraction)
-    const cookiesSource = (request as any).cookies || (request.raw as any)?.cookies || null;
-    const unsignCookieFn = (request as any).unsignCookie || (request.raw as any)?.unsignCookie || null;
+    // Проверяем наличие cookies в request
+    const cookies = (request as any).cookies || (request.raw as any)?.cookies || null;
     
-    if (cookiesSource && CookieConfig.ENABLE_COOKIE_SIGNING && unsignCookieFn) {
-      // Пытаемся получить подписанный cookie
-      const signedCookie = cookiesSource[CookieConfig.ACCESS_TOKEN_NAME];
-      if (signedCookie) {
-        const unsigned = unsignCookieFn(signedCookie, CookieConfig.COOKIE_SECRET);
-        cookieToken = unsigned?.valid ? unsigned.value : null;
+    if (cookies) {
+      const rawCookie = cookies[CookieConfig.ACCESS_TOKEN_NAME];
+      if (rawCookie && rawCookie.startsWith('eyJ')) {
+        // ✅ JWT токен найден
+        const parts = rawCookie.split('.');
         
-        if (unsigned && !unsigned.valid) {
-          this.logger.warn('⚠️ Invalid access token signature. Possible tampering.');
-          throw new UnauthorizedException('Invalid access token signature. Possible tampering.');
+        if (parts.length === 3) {
+          // Стандартный JWT (header.payload.signature)
+          cookieToken = rawCookie;
+        } else if (parts.length === 4) {
+          // JWT + старая подпись cookie (миграция с signed cookies)
+          // Берём только первые 3 части
+          this.logger.debug('🔧 Stripping legacy cookie signature (4 parts → 3)');
+          cookieToken = parts.slice(0, 3).join('.');
         }
       }
-    } else if (cookiesSource) {
-      // Неподписанный cookie
-      cookieToken = cookiesSource[CookieConfig.ACCESS_TOKEN_NAME];
     }
     
     // Если токен найден в cookie и нет Authorization header, добавляем его
