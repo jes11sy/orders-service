@@ -248,7 +248,10 @@ export class OrdersService {
       ),
     ]);
 
-    // Преобразуем типы данных
+    // S3 base URL для преобразования путей в полные URL
+    const s3BaseUrl = process.env.S3_BASE_URL || 'https://s3.twcstorage.ru/f7eead03-crmfiles';
+    
+    // Преобразуем типы данных и пути к файлам в полные URL
     const transformedOrders = orders.map(order => ({
       ...order,
       result: order.result ? parseFloat(order.result) : null,
@@ -258,6 +261,9 @@ export class OrdersService {
       prepayment: order.prepayment ? parseFloat(order.prepayment) : null,
       cashSubmissionAmount: order.cashSubmissionAmount ? parseFloat(order.cashSubmissionAmount) : null,
       partnerPercent: order.partnerPercent ? parseFloat(order.partnerPercent) : null,
+      // Преобразуем пути в полные URL для документов
+      bsoDoc: order.bsoDoc ? order.bsoDoc.map(path => path.startsWith('http') ? path : `${s3BaseUrl}/${path}`) : [],
+      expenditureDoc: order.expenditureDoc ? order.expenditureDoc.map(path => path.startsWith('http') ? path : `${s3BaseUrl}/${path}`) : [],
     }));
 
     const total = Number(totalResult[0].count);
@@ -466,7 +472,17 @@ export class OrdersService {
       throw new ForbiddenException('Access denied');
     }
 
-    return { success: true, data: order };
+    // S3 base URL для преобразования путей в полные URL
+    const s3BaseUrl = process.env.S3_BASE_URL || 'https://s3.twcstorage.ru/f7eead03-crmfiles';
+    
+    // Преобразуем пути к файлам в полные URL
+    const transformedOrder = {
+      ...order,
+      bsoDoc: order.bsoDoc ? order.bsoDoc.map(path => path.startsWith('http') ? path : `${s3BaseUrl}/${path}`) : [],
+      expenditureDoc: order.expenditureDoc ? order.expenditureDoc.map(path => path.startsWith('http') ? path : `${s3BaseUrl}/${path}`) : [],
+    };
+
+    return { success: true, data: transformedOrder };
   }
 
   // ✅ ИСПРАВЛЕНИЕ: Строгая типизация, удалено логирование PII
