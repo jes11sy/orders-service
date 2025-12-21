@@ -13,6 +13,10 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     totalDuration: 0,
   };
 
+  // ✅ FIX: Интервал для keepalive пинга
+  private keepAliveInterval: NodeJS.Timeout | null = null;
+  private isReconnecting = false;
+
   constructor() {
     const isDevelopment = process.env.NODE_ENV !== 'production';
     
@@ -26,6 +30,11 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
       'pool_timeout=20',          // Таймаут получения соединения: 20s
       'connect_timeout=10',       // Таймаут подключения к БД: 10s
       'socket_timeout=60',        // Таймаут socket: 60s
+      // ✅ FIX: TCP Keepalive для предотвращения idle-session timeout
+      'keepalives=1',             // Включить TCP keepalive
+      'keepalives_idle=30',       // Начать keepalive через 30 секунд простоя
+      'keepalives_interval=10',   // Интервал между keepalive пакетами: 10s
+      'keepalives_count=3',       // Количество попыток перед разрывом
     ];
     
     // Проверяем наличие параметров в URL
@@ -48,7 +57,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     });
 
     if (needsParams) {
-      this.logger.log('✅ Connection pool configured: limit=50, pool_timeout=20s, connect_timeout=10s');
+      this.logger.log('✅ Connection pool configured: limit=50, pool_timeout=20s, connect_timeout=10s, keepalive=30s');
     }
 
     // ✅ ОПТИМИЗАЦИЯ: Мониторинг медленных запросов через события
@@ -83,10 +92,23 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
         }
 
         return result;
-      } catch (error) {
+      } catch (error: any) {
         const duration = Date.now() - before;
         this.queryStats.failed++;
         this.queryStats.totalDuration += duration;
+        
+        // ✅ FIX: Обработка ошибки idle-session timeout (код 57P05)
+        const errorMessage = error?.message || '';
+        const isIdleTimeout = errorMessage.includes('idle-session timeout') || 
+                              errorMessage.includes('57P05') ||
+                              errorMessage.includes('terminating connection');
+        
+        if (isIdleTimeout) {
+          this.logger.warn(`⚠️ Idle-session timeout detected, triggering reconnection...`);
+          // Асинхронно запускаем переподключение
+          this.handleConnectionError().catch(() => {});
+        }
+        
         this.logger.error(`❌ Query failed: ${params.model}.${params.action} after ${duration}ms`, error);
         throw error;
       }
@@ -112,6 +134,10 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
       await this.$connect();
       this.logger.log('✅ Database connected successfully');
       this.logger.log('✅ Orders Service ready (high-load configuration)');
+      
+      // ✅ FIX: Запуск keepalive пинга каждые 60 секунд
+      // Это предотвращает закрытие idle соединений PostgreSQL
+      this.startKeepAlive();
     } catch (error) {
       this.logger.error('❌ Failed to connect to database', error);
       throw error;
@@ -119,8 +145,66 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
   }
 
   async onModuleDestroy() {
+    // Остановить keepalive
+    if (this.keepAliveInterval) {
+      clearInterval(this.keepAliveInterval);
+      this.keepAliveInterval = null;
+    }
     await this.$disconnect();
     this.logger.log('✅ Database disconnected');
+  }
+
+  /**
+   * ✅ FIX: Периодический keepalive для предотвращения idle-session timeout
+   * PostgreSQL закрывает соединения после idle_session_timeout (обычно 5 минут)
+   * Этот пинг держит соединения активными
+   */
+  private startKeepAlive() {
+    // Пинг каждые 60 секунд (меньше чем типичный idle_session_timeout в 5 минут)
+    this.keepAliveInterval = setInterval(async () => {
+      try {
+        await this.$queryRaw`SELECT 1`;
+        // Не логируем успешные пинги чтобы не засорять логи
+      } catch (error: any) {
+        this.logger.warn(`⚠️ Keepalive ping failed: ${error?.message || 'Unknown error'}`);
+        // Попытка переподключения
+        await this.handleConnectionError();
+      }
+    }, 60000); // 60 секунд
+    
+    this.logger.log('✅ Keepalive started (interval: 60s)');
+  }
+
+  /**
+   * ✅ FIX: Обработка ошибки подключения с автоматическим переподключением
+   */
+  private async handleConnectionError() {
+    if (this.isReconnecting) {
+      return; // Уже идёт переподключение
+    }
+    
+    this.isReconnecting = true;
+    this.logger.warn('🔄 Attempting to reconnect to database...');
+    
+    try {
+      // Отключаемся (очищаем мёртвые соединения)
+      await this.$disconnect();
+      // Небольшая пауза
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Переподключаемся
+      await this.$connect();
+      this.logger.log('✅ Database reconnected successfully');
+    } catch (error: any) {
+      this.logger.error(`❌ Reconnection failed: ${error?.message || 'Unknown error'}`);
+      // Повторная попытка через 5 секунд
+      setTimeout(() => {
+        this.isReconnecting = false;
+        this.handleConnectionError();
+      }, 5000);
+      return;
+    }
+    
+    this.isReconnecting = false;
   }
 
   /**
@@ -150,6 +234,8 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
       connection_limit: 50,
       pool_timeout_sec: 20,
       connect_timeout_sec: 10,
+      keepalive_active: this.keepAliveInterval !== null,
+      is_reconnecting: this.isReconnecting,
     };
   }
 
