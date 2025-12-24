@@ -1041,27 +1041,12 @@ export class OrdersService {
   }
 
   // ✅ ОПТИМИЗАЦИЯ: Использование DISTINCT вместо загрузки всех заказов
-  // ✅ КЭШИРОВАНИЕ: Результаты кэшируются на 5 минут
-  // Скорость: 500ms → 10ms (50x ускорение) + кэш → <1ms
+  // Скорость: 500ms → 10ms (50x ускорение)
   async getFilterOptions(user: AuthUser) {
     const startTime = Date.now();
     this.logger.debug(`[getFilterOptions] START for user ${user.userId} (${user.role})`);
     
     try {
-      // Генерируем ключ кэша на основе роли и городов пользователя
-      const cacheKey = `filter_options:${user.role}:${user.cities?.sort().join(',') || 'all'}`;
-      
-      // Пытаемся получить из кэша
-      const cached = await this.cacheManager.get(cacheKey);
-      if (cached) {
-        const duration = Date.now() - startTime;
-        this.logger.debug(`[getFilterOptions] FROM CACHE in ${duration}ms`);
-        return {
-          success: true,
-          data: cached,
-        };
-      }
-
       // Строим WHERE условия для SQL
       const whereConditions: string[] = [];
       const params: any[] = [];
@@ -1083,21 +1068,29 @@ export class OrdersService {
       const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
       const additionalWhere = whereConditions.length > 0 ? 'AND' : 'WHERE';
 
-      this.logger.debug(`[getFilterOptions] Executing DISTINCT queries with whereClause: ${whereClause}`);
+      this.logger.debug(`[getFilterOptions] Executing DISTINCT queries with whereClause: ${whereClause}, params: ${JSON.stringify(params)}`);
 
       // ✅ ОПТИМИЗАЦИЯ: Получаем уникальные значения через DISTINCT прямо в БД
       // ✅ ДОБАВЛЕН ТАЙМАУТ: Если запрос занимает >10 секунд, падаем с ошибкой
+      const queryStartTime = Date.now();
+      
       const queryPromise = Promise.all([
         // Уникальные РК
         this.prisma.$queryRawUnsafe<Array<{ rk: string }>>(
           `SELECT DISTINCT rk FROM orders ${whereClause} ${additionalWhere} rk IS NOT NULL ORDER BY rk ASC`,
           ...params
-        ),
+        ).then(result => {
+          this.logger.debug(`[getFilterOptions] RK query completed in ${Date.now() - queryStartTime}ms, rows: ${result.length}`);
+          return result;
+        }),
         // Уникальные типы оборудования
         this.prisma.$queryRawUnsafe<Array<{ type_equipment: string }>>(
           `SELECT DISTINCT type_equipment FROM orders ${whereClause} ${additionalWhere} type_equipment IS NOT NULL ORDER BY type_equipment ASC`,
           ...params
-        ),
+        ).then(result => {
+          this.logger.debug(`[getFilterOptions] Equipment query completed in ${Date.now() - queryStartTime}ms, rows: ${result.length}`);
+          return result;
+        }),
       ]);
 
       // Таймаут 10 секунд (увеличено с 5)
@@ -1116,11 +1109,8 @@ export class OrdersService {
       this.logger.debug(`[getFilterOptions] COMPLETE in ${duration}ms (RKs: ${rksResult.length}, Equipment: ${typeEquipmentsResult.length})`);
 
       if (duration > 1000) {
-        this.logger.warn(`[getFilterOptions] SLOW QUERY: ${duration}ms - caching for 5 minutes`);
+        this.logger.warn(`[getFilterOptions] SLOW QUERY: ${duration}ms`);
       }
-
-      // Кэшируем результат на 5 минут (300 секунд)
-      await this.cacheManager.set(cacheKey, result, 300);
 
       return {
         success: true,
@@ -1129,6 +1119,8 @@ export class OrdersService {
     } catch (error) {
       const duration = Date.now() - startTime;
       this.logger.error(`[getFilterOptions] FAILED after ${duration}ms: ${error.message}`);
+      this.logger.error(`[getFilterOptions] Error stack: ${error.stack}`);
+      this.logger.error(`[getFilterOptions] User: ${JSON.stringify({ role: user.role, cities: user.cities })}`);
       throw error;
     }
   }
