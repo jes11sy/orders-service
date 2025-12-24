@@ -577,12 +577,24 @@ export class OrdersService {
 
     this.logger.log(`Order #${updated.id} updated successfully`);
 
-    // ✅ ИСПРАВЛЕНИЕ: Fire-and-forget для HTTP запроса (не блокирует ответ)
+    // ✅ ИСПРАВЛЕНИЕ: Синхронная отправка в cash-service для гарантии записи
+    // Т.к. сервисы на одном сервере, задержка минимальная (~10-50ms)
     if (dto.statusOrder === 'Готово' && updated.result && Number(updated.result) > 0) {
-      this.logger.log(`Order #${updated.id} completed, syncing cash receipt (async)`);
-      // Fire-and-forget: не ждем завершения
-      this.syncCashReceipt(updated, user, headers)
-        .catch(err => this.logger.error(`Failed to sync cash for order #${updated.id}: ${err.message}`));
+      this.logger.log(`Order #${updated.id} completed, syncing cash receipt (sync)`);
+      try {
+        await this.syncCashReceipt(updated, user, headers);
+      } catch (err) {
+        // Откатываем статус заказа, если не удалось записать в кассу
+        this.logger.error(`Failed to sync cash for order #${updated.id}, rolling back status: ${err.message}`);
+        await this.prisma.order.update({
+          where: { id: order.id },
+          data: { 
+            statusOrder: order.statusOrder, // Возвращаем старый статус
+            closingData: order.closingData,  // Возвращаем старую дату
+          },
+        });
+        throw new Error(`Сервис транзакций недоступен.`);
+      }
     }
     
     // ✅ ОПТИМИЗАЦИЯ: Все уведомления отправляются асинхронно (fire-and-forget)
@@ -767,11 +779,24 @@ export class OrdersService {
       },
     });
 
-    // ✅ ИСПРАВЛЕНИЕ: Fire-and-forget для HTTP запроса
+    // ✅ ИСПРАВЛЕНИЕ: Синхронная отправка в cash-service для гарантии записи
+    // Т.к. сервисы на одном сервере, задержка минимальная (~10-50ms)
     if (status === 'Готово' && updated.result && Number(updated.result) > 0) {
-      this.logger.log(`Order #${updated.id} status -> Готово, syncing cash (async)`);
-      this.syncCashReceipt(updated, user, headers)
-        .catch(err => this.logger.error(`Failed to sync cash for order #${updated.id}: ${err.message}`));
+      this.logger.log(`Order #${updated.id} status -> Готово, syncing cash (sync)`);
+      try {
+        await this.syncCashReceipt(updated, user, headers);
+      } catch (err) {
+        // Откатываем статус заказа, если не удалось записать в кассу
+        this.logger.error(`Failed to sync cash for order #${updated.id}, rolling back status: ${err.message}`);
+        await this.prisma.order.update({
+          where: { id },
+          data: { 
+            statusOrder: order.statusOrder, // Возвращаем старый статус
+            closingData: order.closingData,  // Возвращаем старую дату
+          },
+        });
+        throw new Error(`Сервис транзакций недоступен.`);
+      }
     }
 
     return { success: true, data: updated };
@@ -895,70 +920,95 @@ export class OrdersService {
       }
 
       this.logger.debug(`[syncCashReceipt] Sending HTTP POST to ${cashServiceUrl}/api/v1/cash for order #${order.id}`);
-      const httpStartTime = Date.now();
-
-      // ✅ ИСПРАВЛЕНО: Убрали retry - если падает, пусть падает быстро
-      // Уменьшили таймаут до 3 секунд
-      const response = await firstValueFrom(
-        this.httpService.post(
-          `${cashServiceUrl}/api/v1/cash`,
-          cashData,
-          { 
-            headers,
-            timeout: 3000, // ✅ Таймаут 3 секунды
-            maxRedirects: 0, // ✅ Без редиректов
-            validateStatus: (status) => status >= 200 && status < 300, // ✅ Только 2xx считаем успехом
-          }
-        ).pipe(
-          timeout(3000), // ✅ RxJS таймаут 3 секунды
-          catchError((error) => {
-            // ✅ ЗАЩИТА: Ловим HTML ответы и другие ошибки
-            const httpDuration = Date.now() - httpStartTime;
-            
-            if (error.response) {
-              const contentType = error.response.headers['content-type'] || '';
-              const statusCode = error.response.status;
-              const data = error.response.data;
-              
-              // Если получили HTML вместо JSON
-              if (contentType.includes('text/html')) {
-                const htmlPreview = typeof data === 'string' ? data.substring(0, 100) : String(data).substring(0, 100);
-                this.logger.error(`[syncCashReceipt] ❌ Received HTML instead of JSON from cash-service (${statusCode}): ${htmlPreview}...`);
-                throw new Error(`Cash service returned HTML error (${statusCode})`);
+      
+      // ✅ RETRY-логика: 3 попытки с экспоненциальной задержкой
+      let lastError: Error | null = null;
+      let response: any = null;
+      const maxRetries = 3;
+      
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          const httpStartTime = Date.now();
+          
+          response = await firstValueFrom(
+            this.httpService.post(
+              `${cashServiceUrl}/api/v1/cash`,
+              cashData,
+              { 
+                headers,
+                timeout: 5000, // ✅ Таймаут 5 секунд (локальная сеть)
+                maxRedirects: 0,
+                validateStatus: (status) => status >= 200 && status < 300,
               }
-              
-              // Другие HTTP ошибки
-              this.logger.error(`[syncCashReceipt] ❌ HTTP ${statusCode} from cash-service after ${httpDuration}ms: ${JSON.stringify(data).substring(0, 200)}`);
-              throw new Error(`Cash service error: ${statusCode}`);
-            }
-            
-            // Таймаут или network error
-            if (error.code === 'ECONNREFUSED') {
-              this.logger.error(`[syncCashReceipt] ❌ Cannot connect to cash-service at ${cashServiceUrl}`);
-              throw new Error('Cash service unavailable');
-            }
-            
-            if (error.name === 'TimeoutError') {
-              this.logger.error(`[syncCashReceipt] ❌ Timeout (>3s) waiting for cash-service`);
-              throw new Error('Cash service timeout');
-            }
-            
-            // Прочие ошибки
-            this.logger.error(`[syncCashReceipt] ❌ Unknown error after ${httpDuration}ms: ${error.message}`);
-            throw error;
-          })
-        )
-      );
-
-      const httpDuration = Date.now() - httpStartTime;
-      this.logger.log(`[syncCashReceipt] ✅ Cash synced for order #${order.id} in ${httpDuration}ms`);
+            ).pipe(
+              timeout(5000),
+              catchError((error) => {
+                const httpDuration = Date.now() - httpStartTime;
+                
+                if (error.response) {
+                  const contentType = error.response.headers['content-type'] || '';
+                  const statusCode = error.response.status;
+                  const data = error.response.data;
+                  
+                  // Если получили HTML вместо JSON
+                  if (contentType.includes('text/html')) {
+                    const htmlPreview = typeof data === 'string' ? data.substring(0, 100) : String(data).substring(0, 100);
+                    this.logger.error(`[syncCashReceipt] ❌ Received HTML instead of JSON from cash-service (${statusCode}): ${htmlPreview}...`);
+                    throw new Error(`Сервер кассы вернул ошибку (${statusCode})`);
+                  }
+                  
+                  // Другие HTTP ошибки - формируем понятное сообщение
+                  const errorMsg = data?.message || data?.error || JSON.stringify(data).substring(0, 200);
+                  this.logger.error(`[syncCashReceipt] ❌ HTTP ${statusCode} from cash-service after ${httpDuration}ms: ${errorMsg}`);
+                  throw new Error(`Ошибка от сервера кассы (${statusCode}): ${errorMsg}`);
+                }
+                
+                // Таймаут или network error
+                if (error.code === 'ECONNREFUSED') {
+                  this.logger.error(`[syncCashReceipt] ❌ Cannot connect to cash-service at ${cashServiceUrl}`);
+                  throw new Error('Сервер кассы недоступен');
+                }
+                
+                if (error.name === 'TimeoutError') {
+                  this.logger.error(`[syncCashReceipt] ❌ Timeout (>5s) waiting for cash-service`);
+                  throw new Error('Превышено время ожидания ответа от сервера кассы');
+                }
+                
+                // Прочие ошибки
+                this.logger.error(`[syncCashReceipt] ❌ Unknown error after ${httpDuration}ms: ${error.message}`);
+                throw error;
+              })
+            )
+          );
+          
+          const httpDuration = Date.now() - httpStartTime;
+          this.logger.log(`[syncCashReceipt] ✅ Cash synced for order #${order.id} in ${httpDuration}ms (attempt ${attempt})`);
+          break; // Успех - выходим из цикла
+          
+        } catch (err) {
+          lastError = err instanceof Error ? err : new Error(String(err));
+          
+          if (attempt < maxRetries) {
+            const delayMs = Math.pow(2, attempt - 1) * 500; // 500ms, 1s, 2s
+            this.logger.warn(`[syncCashReceipt] Attempt ${attempt} failed for order #${order.id}, retrying in ${delayMs}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+          } else {
+            this.logger.error(`[syncCashReceipt] All ${maxRetries} attempts failed for order #${order.id}`);
+          }
+        }
+      }
+      
+      // Если после всех попыток не удалось
+      if (!response && lastError) {
+        throw lastError;
+      }
       
       // Обновляем статус подачи кассы в заказе
       this.logger.debug(`[syncCashReceipt] Updating order #${order.id} status in DB`);
       await this.prisma.order.update({
         where: { id: order.id },
         data: {
-          cashSubmissionStatus: 'Не отправлено',
+          cashSubmissionStatus: 'Отправлено',
           cashSubmissionDate: new Date(),
           cashSubmissionAmount: masterChangeAmount,
         },
@@ -972,7 +1022,7 @@ export class OrdersService {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       this.logger.error(`[syncCashReceipt] FAILED for order #${order.id} after ${totalDuration}ms: ${errorMessage}`);
       
-      // ✅ ИСПРАВЛЕНИЕ: Не бросаем исключение (fire-and-forget)
+      // ✅ ИСПРАВЛЕНИЕ: Бросаем исключение наверх для отката транзакции
       try {
         await this.prisma.order.update({
           where: { id: order.id },
@@ -984,6 +1034,9 @@ export class OrdersService {
       } catch (updateError) {
         this.logger.error(`Failed to update error status: ${updateError instanceof Error ? updateError.message : 'Unknown'}`);
       }
+      
+      // Пробрасываем ошибку для отката статуса заказа
+      throw error;
     }
   }
 
