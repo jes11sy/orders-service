@@ -1041,12 +1041,27 @@ export class OrdersService {
   }
 
   // ✅ ОПТИМИЗАЦИЯ: Использование DISTINCT вместо загрузки всех заказов
-  // Скорость: 500ms → 10ms (50x ускорение)
+  // ✅ КЭШИРОВАНИЕ: Результаты кэшируются на 5 минут
+  // Скорость: 500ms → 10ms (50x ускорение) + кэш → <1ms
   async getFilterOptions(user: AuthUser) {
     const startTime = Date.now();
     this.logger.debug(`[getFilterOptions] START for user ${user.userId} (${user.role})`);
     
     try {
+      // Генерируем ключ кэша на основе роли и городов пользователя
+      const cacheKey = `filter_options:${user.role}:${user.cities?.sort().join(',') || 'all'}`;
+      
+      // Пытаемся получить из кэша
+      const cached = await this.cacheManager.get(cacheKey);
+      if (cached) {
+        const duration = Date.now() - startTime;
+        this.logger.debug(`[getFilterOptions] FROM CACHE in ${duration}ms`);
+        return {
+          success: true,
+          data: cached,
+        };
+      }
+
       // Строим WHERE условия для SQL
       const whereConditions: string[] = [];
       const params: any[] = [];
@@ -1071,7 +1086,7 @@ export class OrdersService {
       this.logger.debug(`[getFilterOptions] Executing DISTINCT queries with whereClause: ${whereClause}`);
 
       // ✅ ОПТИМИЗАЦИЯ: Получаем уникальные значения через DISTINCT прямо в БД
-      // ✅ ДОБАВЛЕН ТАЙМАУТ: Если запрос занимает >5 секунд, падаем с ошибкой
+      // ✅ ДОБАВЛЕН ТАЙМАУТ: Если запрос занимает >10 секунд, падаем с ошибкой
       const queryPromise = Promise.all([
         // Уникальные РК
         this.prisma.$queryRawUnsafe<Array<{ rk: string }>>(
@@ -1085,26 +1100,31 @@ export class OrdersService {
         ),
       ]);
 
-      // Таймаут 5 секунд
+      // Таймаут 10 секунд (увеличено с 5)
       const timeoutPromise = new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error('getFilterOptions query timeout (>5s)')), 5000)
+        setTimeout(() => reject(new Error('getFilterOptions query timeout (>10s)')), 10000)
       );
 
       const [rksResult, typeEquipmentsResult] = await Promise.race([queryPromise, timeoutPromise]);
+
+      const result = {
+        rks: rksResult.map(r => r.rk),
+        typeEquipments: typeEquipmentsResult.map(t => t.type_equipment),
+      };
 
       const duration = Date.now() - startTime;
       this.logger.debug(`[getFilterOptions] COMPLETE in ${duration}ms (RKs: ${rksResult.length}, Equipment: ${typeEquipmentsResult.length})`);
 
       if (duration > 1000) {
-        this.logger.warn(`[getFilterOptions] SLOW QUERY: ${duration}ms`);
+        this.logger.warn(`[getFilterOptions] SLOW QUERY: ${duration}ms - caching for 5 minutes`);
       }
+
+      // Кэшируем результат на 5 минут (300 секунд)
+      await this.cacheManager.set(cacheKey, result, 300);
 
       return {
         success: true,
-        data: {
-          rks: rksResult.map(r => r.rk),
-          typeEquipments: typeEquipmentsResult.map(t => t.type_equipment),
-        },
+        data: result,
       };
     } catch (error) {
       const duration = Date.now() - startTime;
