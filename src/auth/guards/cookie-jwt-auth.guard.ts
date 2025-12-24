@@ -1,6 +1,6 @@
 import { Injectable, ExecutionContext, UnauthorizedException, Logger } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
-import { CookieConfig } from '../../config/cookie.config';
+import { CookieConfig, getCookieName } from '../../config/cookie.config';
 import { FastifyRequest } from 'fastify';
 
 /**
@@ -24,7 +24,18 @@ export class CookieJwtAuthGuard extends AuthGuard('jwt') {
     const cookies = (request as any).cookies || (request.raw as any)?.cookies || null;
     
     if (cookies) {
-      const rawCookie = cookies[CookieConfig.ACCESS_TOKEN_NAME];
+      // Определяем имя cookie на основе origin
+      const origin = request.headers.origin || request.headers.referer;
+      const accessTokenName = getCookieName(CookieConfig.ACCESS_TOKEN_NAME, origin);
+      
+      // Пробуем получить токен с динамическим именем (новый способ)
+      let rawCookie = cookies[accessTokenName];
+      
+      // Fallback: если не нашли, пробуем базовое имя (для обратной совместимости)
+      if (!rawCookie) {
+        rawCookie = cookies[CookieConfig.ACCESS_TOKEN_NAME];
+      }
+      
       if (rawCookie && rawCookie.startsWith('eyJ')) {
         // ✅ JWT токен найден
         const parts = rawCookie.split('.');
