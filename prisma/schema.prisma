@@ -63,6 +63,12 @@ model Order {
   @@index([statusOrder, masterId]) // ✅ Частая комбинация фильтров
   @@index([avitoChatId]) // ✅ Для поиска по чатам Avito
   @@index([cashSubmissionStatus]) // ✅ Для фильтрации по статусу сдачи кассы
+  // ✅ FIX: Индексы для getFilterOptions DISTINCT запросов (исправляет timeout >10s)
+  @@index([city]) // Для WHERE city = ANY($1::text[])
+  @@index([city, rk]) // Для SELECT DISTINCT rk WHERE city
+  @@index([city, typeEquipment]) // Для SELECT DISTINCT type_equipment WHERE city
+  @@index([rk]) // Для DISTINCT rk без фильтра
+  @@index([typeEquipment]) // Для DISTINCT type_equipment без фильтра
   @@map("orders")
 }
 

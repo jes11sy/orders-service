@@ -156,11 +156,12 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
 
   /**
    * ✅ FIX: Периодический keepalive для предотвращения idle-session timeout
-   * PostgreSQL закрывает соединения после idle_session_timeout (обычно 5 минут)
+   * PostgreSQL/прокси могут закрывать соединения после idle timeout
    * Этот пинг держит соединения активными
    */
   private startKeepAlive() {
-    // Пинг каждые 60 секунд (меньше чем типичный idle_session_timeout в 5 минут)
+    // ✅ FIX: Пинг каждые 20 секунд (агрессивнее, для cloud/proxy окружений)
+    // Многие cloud PostgreSQL (Neon, Supabase, managed PostgreSQL) имеют короткий idle timeout
     this.keepAliveInterval = setInterval(async () => {
       try {
         await this.$queryRaw`SELECT 1`;
@@ -170,9 +171,24 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
         // Попытка переподключения
         await this.handleConnectionError();
       }
-    }, 60000); // 60 секунд
+    }, 20000); // 20 секунд (было 60)
     
-    this.logger.log('✅ Keepalive started (interval: 60s)');
+    this.logger.log('✅ Keepalive started (interval: 20s)');
+  }
+
+  /**
+   * ✅ FIX: Проверка соединения перед тяжёлым запросом
+   * Возвращает true если соединение живое, false если нужен reconnect
+   */
+  async ensureConnection(): Promise<boolean> {
+    try {
+      await this.$queryRaw`SELECT 1`;
+      return true;
+    } catch (error: any) {
+      this.logger.warn(`⚠️ Connection check failed, reconnecting...`);
+      await this.handleConnectionError();
+      return false;
+    }
   }
 
   /**

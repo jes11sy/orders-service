@@ -16,6 +16,10 @@ import { NotificationsService } from '../notifications/notifications.service';
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
 
+  // ✅ FIX: Кэш для getFilterOptions (предотвращает timeout при частых запросах)
+  private filterOptionsCache = new Map<string, { data: any; expiry: number }>();
+  private readonly FILTER_OPTIONS_CACHE_TTL = 60 * 1000; // 1 минута
+
   constructor(
     private prisma: PrismaService,
     private httpService: HttpService,
@@ -1042,11 +1046,30 @@ export class OrdersService {
 
   // ✅ ОПТИМИЗАЦИЯ: Использование DISTINCT вместо загрузки всех заказов
   // Скорость: 500ms → 10ms (50x ускорение)
+  // ✅ FIX: Добавлен кэш для предотвращения timeout при частых запросах
   async getFilterOptions(user: AuthUser) {
     const startTime = Date.now();
     this.logger.debug(`[getFilterOptions] START for user ${user.userId} (${user.role})`);
     
     try {
+      // ✅ Генерируем ключ кэша на основе роли и городов пользователя
+      const cacheKey = user.role === 'master' 
+        ? `master_${user.userId}` 
+        : user.role === 'director' && user.cities?.length 
+          ? `director_${user.cities.sort().join(',')}` 
+          : 'global';
+      
+      // ✅ Проверяем кэш
+      const cached = this.filterOptionsCache.get(cacheKey);
+      if (cached && cached.expiry > Date.now()) {
+        this.logger.debug(`[getFilterOptions] CACHE HIT for key=${cacheKey}, age=${Date.now() - (cached.expiry - this.FILTER_OPTIONS_CACHE_TTL)}ms`);
+        return {
+          success: true,
+          data: cached.data,
+          cached: true,
+        };
+      }
+
       // Строим WHERE условия для SQL
       const whereConditions: string[] = [];
       const params: any[] = [];
@@ -1070,40 +1093,70 @@ export class OrdersService {
 
       this.logger.debug(`[getFilterOptions] Executing DISTINCT queries with whereClause: ${whereClause}, params: ${JSON.stringify(params)}`);
 
-      // ✅ ОПТИМИЗАЦИЯ: Получаем уникальные значения через DISTINCT прямо в БД
-      // ✅ ДОБАВЛЕН ТАЙМАУТ: Если запрос занимает >10 секунд, падаем с ошибкой
-      const queryStartTime = Date.now();
-      
-      const queryPromise = Promise.all([
-        // Уникальные РК
-        this.prisma.$queryRawUnsafe<Array<{ rk: string }>>(
-          `SELECT DISTINCT rk FROM orders ${whereClause} ${additionalWhere} rk IS NOT NULL ORDER BY rk ASC`,
-          ...params
-        ).then(result => {
-          this.logger.debug(`[getFilterOptions] RK query completed in ${Date.now() - queryStartTime}ms, rows: ${result.length}`);
-          return result;
-        }),
-        // Уникальные типы оборудования
-        this.prisma.$queryRawUnsafe<Array<{ type_equipment: string }>>(
-          `SELECT DISTINCT type_equipment FROM orders ${whereClause} ${additionalWhere} type_equipment IS NOT NULL ORDER BY type_equipment ASC`,
-          ...params
-        ).then(result => {
-          this.logger.debug(`[getFilterOptions] Equipment query completed in ${Date.now() - queryStartTime}ms, rows: ${result.length}`);
-          return result;
-        }),
-      ]);
+      // ✅ FIX: Проверяем соединение перед тяжёлым запросом (предотвращает зависание на мёртвом соединении)
+      await this.prisma.ensureConnection();
 
-      // Таймаут 10 секунд (увеличено с 5)
-      const timeoutPromise = new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error('getFilterOptions query timeout (>10s)')), 10000)
-      );
+      // ✅ FIX: Выполняем запрос с retry логикой для обработки idle-session timeout
+      const executeQueries = async (attempt: number = 1): Promise<[Array<{ rk: string }>, Array<{ type_equipment: string }>]> => {
+        const queryStartTime = Date.now();
+        
+        const queryPromise = Promise.all([
+          // Уникальные РК
+          this.prisma.$queryRawUnsafe<Array<{ rk: string }>>(
+            `SELECT DISTINCT rk FROM orders ${whereClause} ${additionalWhere} rk IS NOT NULL ORDER BY rk ASC`,
+            ...params
+          ).then(result => {
+            this.logger.debug(`[getFilterOptions] RK query completed in ${Date.now() - queryStartTime}ms, rows: ${result.length}`);
+            return result;
+          }),
+          // Уникальные типы оборудования
+          this.prisma.$queryRawUnsafe<Array<{ type_equipment: string }>>(
+            `SELECT DISTINCT type_equipment FROM orders ${whereClause} ${additionalWhere} type_equipment IS NOT NULL ORDER BY type_equipment ASC`,
+            ...params
+          ).then(result => {
+            this.logger.debug(`[getFilterOptions] Equipment query completed in ${Date.now() - queryStartTime}ms, rows: ${result.length}`);
+            return result;
+          }),
+        ]);
 
-      const [rksResult, typeEquipmentsResult] = await Promise.race([queryPromise, timeoutPromise]);
+        // Таймаут 5 секунд (уменьшено с 10 для быстрого retry)
+        const timeoutPromise = new Promise<never>((_, reject) => 
+          setTimeout(() => reject(new Error('getFilterOptions query timeout (>5s)')), 5000)
+        );
+
+        try {
+          return await Promise.race([queryPromise, timeoutPromise]);
+        } catch (error: any) {
+          const isRetryableError = 
+            error.message?.includes('timeout') ||
+            error.message?.includes('idle-session') ||
+            error.message?.includes('57P05') ||
+            error.message?.includes('terminating connection') ||
+            error.message?.includes('Connection reset');
+          
+          if (isRetryableError && attempt < 3) {
+            this.logger.warn(`[getFilterOptions] Attempt ${attempt} failed, retrying... (${error.message})`);
+            // Небольшая пауза перед retry
+            await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+            return executeQueries(attempt + 1);
+          }
+          throw error;
+        }
+      };
+
+      const [rksResult, typeEquipmentsResult] = await executeQueries();
 
       const result = {
         rks: rksResult.map(r => r.rk),
         typeEquipments: typeEquipmentsResult.map(t => t.type_equipment),
       };
+
+      // ✅ Сохраняем в кэш
+      this.filterOptionsCache.set(cacheKey, {
+        data: result,
+        expiry: Date.now() + this.FILTER_OPTIONS_CACHE_TTL,
+      });
+      this.logger.debug(`[getFilterOptions] Cached result for key=${cacheKey}`);
 
       const duration = Date.now() - startTime;
       this.logger.debug(`[getFilterOptions] COMPLETE in ${duration}ms (RKs: ${rksResult.length}, Equipment: ${typeEquipmentsResult.length})`);
@@ -1116,13 +1169,31 @@ export class OrdersService {
         success: true,
         data: result,
       };
-    } catch (error) {
+    } catch (error: any) {
       const duration = Date.now() - startTime;
       this.logger.error(`[getFilterOptions] FAILED after ${duration}ms: ${error.message}`);
       this.logger.error(`[getFilterOptions] Error stack: ${error.stack}`);
       this.logger.error(`[getFilterOptions] User: ${JSON.stringify({ role: user.role, cities: user.cities })}`);
+      
+      // ✅ FIX: При ошибке возвращаем пустые опции вместо падения
+      // Это лучше чем 500 ошибка для пользователя
+      if (error.message?.includes('timeout')) {
+        this.logger.warn('[getFilterOptions] Returning empty options due to timeout');
+        return {
+          success: true,
+          data: { rks: [], typeEquipments: [] },
+          error: 'timeout',
+        };
+      }
+      
       throw error;
     }
+  }
+
+  // ✅ Метод для инвалидации кэша filter options (вызывать при создании/обновлении заказа)
+  private invalidateFilterOptionsCache() {
+    this.filterOptionsCache.clear();
+    this.logger.debug('[getFilterOptions] Cache invalidated');
   }
 
   async submitCashForReview(orderId: number, cashReceiptDoc: string | undefined, user: AuthUser) {
