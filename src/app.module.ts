@@ -5,6 +5,7 @@ import { OrdersModule } from './orders/orders.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { AuditModule } from './audit/audit.module';
 import { RequestLoggerMiddleware } from './middleware/request-logger.middleware';
 
 @Module({
@@ -18,6 +19,7 @@ import { RequestLoggerMiddleware } from './middleware/request-logger.middleware'
     AuthModule,
     OrdersModule,
     NotificationsModule,
+    AuditModule,
   ],
 })
 export class AppModule implements NestModule {

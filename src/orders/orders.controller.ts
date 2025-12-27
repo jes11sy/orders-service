@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Patch, Body, Param, Query, UseGuards, Request, HttpCode, HttpStatus, Logger, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Body, Param, Query, UseGuards, Request, HttpCode, HttpStatus, Logger, BadRequestException, Ip } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { CookieJwtAuthGuard } from '../auth/guards/cookie-jwt-auth.guard';
 import { OrdersService } from './orders.service';
@@ -10,6 +10,7 @@ import { QueryOrdersDto } from './dto/query-orders.dto';
 import { RolesGuard, Roles, UserRole } from '../auth/roles.guard';
 import { AuthUser } from '../types/auth-user.type';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
 
 // ✅ ИСПРАВЛЕНИЕ: Типизированный Request
 interface AuthenticatedRequest {
@@ -25,6 +26,7 @@ export class OrdersController {
   constructor(
     private ordersService: OrdersService,
     private prismaService: PrismaService,
+    private auditService: AuditService,
   ) {}
 
   @Get('health')
@@ -73,12 +75,25 @@ export class OrdersController {
   @ApiBearerAuth()
   @Roles(UserRole.operator)
   @ApiOperation({ summary: 'Create new order' })
-  async createOrder(@Body() dto: CreateOrderDto, @Request() req: AuthenticatedRequest) {
+  async createOrder(@Body() dto: CreateOrderDto, @Request() req: AuthenticatedRequest, @Ip() ip: string) {
     // ✅ ИСПРАВЛЕНИЕ: Удалено логирование конфиденциальных данных
     this.logger.log(`Creating order for operator ${req.user.userId}`);
     try {
       const result = await this.ordersService.createOrder(dto, req.user);
       this.logger.log(`Order created successfully: #${result.data.id}`);
+      
+      // Логируем создание заказа
+      const userAgent = req.headers['user-agent'] || 'Unknown';
+      await this.auditService.logOrderCreate(
+        result.data.id,
+        req.user.userId,
+        req.user.role,
+        req.user.login,
+        ip,
+        userAgent as string,
+        dto
+      );
+      
       return result;
     } catch (error) {
       this.logger.error(`Error creating order: ${error.message}`);
@@ -91,8 +106,22 @@ export class OrdersController {
   @ApiBearerAuth()
   @Roles(UserRole.operator)
   @ApiOperation({ summary: 'Create order from call' })
-  async createOrderFromCall(@Body() dto: CreateOrderFromCallDto, @Request() req: AuthenticatedRequest) {
-    return this.ordersService.createOrderFromCall(dto, req.user);
+  async createOrderFromCall(@Body() dto: CreateOrderFromCallDto, @Request() req: AuthenticatedRequest, @Ip() ip: string) {
+    const result = await this.ordersService.createOrderFromCall(dto, req.user);
+    
+    // Логируем создание заказа из звонка
+    const userAgent = req.headers['user-agent'] || 'Unknown';
+    await this.auditService.logOrderCreate(
+      result.data.id,
+      req.user.userId,
+      req.user.role,
+      req.user.login,
+      ip,
+      userAgent as string,
+      dto
+    );
+    
+    return result;
   }
 
   @Post('from-chat')
@@ -100,12 +129,25 @@ export class OrdersController {
   @ApiBearerAuth()
   @Roles(UserRole.operator)
   @ApiOperation({ summary: 'Create order from chat' })
-  async createOrderFromChat(@Body() dto: CreateOrderFromChatDto, @Request() req: AuthenticatedRequest) {
+  async createOrderFromChat(@Body() dto: CreateOrderFromChatDto, @Request() req: AuthenticatedRequest, @Ip() ip: string) {
     // ✅ ИСПРАВЛЕНИЕ: Удалено логирование конфиденциальных данных
     this.logger.log(`Creating order from chat for operator ${req.user.userId}`);
     try {
       const result = await this.ordersService.createOrderFromChat(dto, req.user);
       this.logger.log(`Order from chat created successfully: #${result.data.id}`);
+      
+      // Логируем создание заказа из чата
+      const userAgent = req.headers['user-agent'] || 'Unknown';
+      await this.auditService.logOrderCreate(
+        result.data.id,
+        req.user.userId,
+        req.user.role,
+        req.user.login,
+        ip,
+        userAgent as string,
+        dto
+      );
+      
       return result;
     } catch (error) {
       this.logger.error(`Error creating order from chat: ${error.message}`);
@@ -126,8 +168,37 @@ export class OrdersController {
   @ApiBearerAuth()
   @Roles(UserRole.operator, UserRole.director, UserRole.master)
   @ApiOperation({ summary: 'Update order (operator, director, master)' })
-  async updateOrder(@Param('id') id: string, @Body() dto: UpdateOrderDto, @Request() req: AuthenticatedRequest) {
-    return this.ordersService.updateOrder(+id, dto, req.user, req.headers);
+  async updateOrder(@Param('id') id: string, @Body() dto: UpdateOrderDto, @Request() req: AuthenticatedRequest, @Ip() ip: string) {
+    const result = await this.ordersService.updateOrder(+id, dto, req.user, req.headers);
+    
+    // Логируем обновление или закрытие заказа
+    const userAgent = req.headers['user-agent'] || 'Unknown';
+    
+    if (dto.statusOrder === 'Готово') {
+      // Закрытие заказа
+      await this.auditService.logOrderClose(
+        +id,
+        req.user.userId,
+        req.user.role,
+        req.user.login,
+        ip,
+        userAgent as string,
+        result.data
+      );
+    } else {
+      // Обычное обновление
+      await this.auditService.logOrderUpdate(
+        +id,
+        req.user.userId,
+        req.user.role,
+        req.user.login,
+        ip,
+        userAgent as string,
+        dto
+      );
+    }
+    
+    return result;
   }
 
   @Patch(':id/status')
@@ -135,8 +206,29 @@ export class OrdersController {
   @ApiBearerAuth()
   @Roles(UserRole.operator, UserRole.director, UserRole.master)
   @ApiOperation({ summary: 'Update order status' })
-  async updateStatus(@Param('id') id: string, @Body('status') status: string, @Request() req: AuthenticatedRequest) {
-    return this.ordersService.updateStatus(+id, status, req.user, req.headers);
+  async updateStatus(@Param('id') id: string, @Body('status') status: string, @Request() req: AuthenticatedRequest, @Ip() ip: string) {
+    // Сначала получаем старый статус
+    const order = await this.prismaService.order.findUnique({ where: { id: +id } });
+    const oldStatus = order?.statusOrder;
+    
+    const result = await this.ordersService.updateStatus(+id, status, req.user, req.headers);
+    
+    // Логируем изменение статуса
+    if (oldStatus) {
+      const userAgent = req.headers['user-agent'] || 'Unknown';
+      await this.auditService.logOrderStatusChange(
+        +id,
+        req.user.userId,
+        req.user.role,
+        req.user.login,
+        ip,
+        userAgent as string,
+        oldStatus,
+        status
+      );
+    }
+    
+    return result;
   }
 
   @Patch(':id/master')
