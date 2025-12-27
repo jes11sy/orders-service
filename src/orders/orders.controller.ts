@@ -169,6 +169,9 @@ export class OrdersController {
   @Roles(UserRole.operator, UserRole.director, UserRole.master)
   @ApiOperation({ summary: 'Update order (operator, director, master)' })
   async updateOrder(@Param('id') id: string, @Body() dto: UpdateOrderDto, @Request() req: AuthenticatedRequest, @Ip() ip: string) {
+    // Получаем старый заказ ДО обновления
+    const oldOrder = await this.prismaService.order.findUnique({ where: { id: +id } });
+    
     const result = await this.ordersService.updateOrder(+id, dto, req.user, req.headers);
     
     // Логируем обновление или закрытие заказа
@@ -186,7 +189,36 @@ export class OrdersController {
         result.data
       );
     } else {
-      // Обычное обновление
+      // Обычное обновление - сравниваем что изменилось
+      const changes: any = {};
+      
+      // Сравниваем основные поля
+      if (dto.statusOrder !== undefined && oldOrder?.statusOrder !== dto.statusOrder) {
+        changes.statusOrder = { old: oldOrder?.statusOrder, new: dto.statusOrder };
+      }
+      if (dto.masterId !== undefined && oldOrder?.masterId !== dto.masterId) {
+        changes.masterId = { old: oldOrder?.masterId, new: dto.masterId };
+      }
+      if (dto.address !== undefined && oldOrder?.address !== dto.address) {
+        changes.address = { old: oldOrder?.address, new: dto.address };
+      }
+      if (dto.phone !== undefined && oldOrder?.phone !== dto.phone) {
+        changes.phone = { old: oldOrder?.phone, new: dto.phone };
+      }
+      if (dto.clientName !== undefined && oldOrder?.clientName !== dto.clientName) {
+        changes.clientName = { old: oldOrder?.clientName, new: dto.clientName };
+      }
+      if (dto.dateMeeting !== undefined) {
+        const oldDate = oldOrder?.dateMeeting?.toISOString();
+        const newDate = new Date(dto.dateMeeting).toISOString();
+        if (oldDate !== newDate) {
+          changes.dateMeeting = { old: oldDate, new: newDate };
+        }
+      }
+      if (dto.problem !== undefined && oldOrder?.problem !== dto.problem) {
+        changes.problem = { old: oldOrder?.problem, new: dto.problem };
+      }
+      
       await this.auditService.logOrderUpdate(
         +id,
         req.user.userId,
@@ -194,7 +226,7 @@ export class OrdersController {
         req.user.login,
         ip,
         userAgent as string,
-        dto
+        changes
       );
     }
     
