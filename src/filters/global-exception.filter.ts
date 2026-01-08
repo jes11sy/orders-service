@@ -6,7 +6,7 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
-import { Request, Response } from 'express';
+import { FastifyReply, FastifyRequest } from 'fastify';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Catch()
@@ -17,8 +17,8 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
   async catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
-    const response = ctx.getResponse<Response>();
-    const request = ctx.getRequest<Request>();
+    const response = ctx.getResponse<FastifyReply>();
+    const request = ctx.getRequest<FastifyRequest>();
 
     const status =
       exception instanceof HttpException
@@ -70,7 +70,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       stackTrace,
     );
 
-    response.status(status).json({
+    response.status(status).send({
       success: false,
       statusCode: status,
       timestamp: new Date().toISOString(),
