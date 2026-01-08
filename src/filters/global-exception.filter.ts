@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { FastifyReply, FastifyRequest } from 'fastify';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Catch()
@@ -57,7 +58,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
               body: request.body,
               params: request.params,
               query: request.query,
-            },
+            } as Prisma.InputJsonValue,
           },
         });
       } catch (dbError) {
