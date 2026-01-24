@@ -583,8 +583,10 @@ export class OrdersService {
 
     // ✅ ИСПРАВЛЕНИЕ: Синхронная отправка в cash-service для гарантии записи
     // Т.к. сервисы на одном сервере, задержка минимальная (~10-50ms)
-    if (dto.statusOrder === 'Готово' && updated.result && Number(updated.result) > 0) {
-      this.logger.log(`Order #${updated.id} completed, syncing cash receipt (sync)`);
+    // 🔧 FIX: Проверяем masterChange > 0, т.к. приход создается на эту сумму, а не на result
+    // Если masterChange = 0 (например result=1000, expenditure=1000), приход не создаем
+    if (dto.statusOrder === 'Готово' && updated.masterChange && Number(updated.masterChange) > 0) {
+      this.logger.log(`Order #${updated.id} completed, syncing cash receipt (masterChange=${updated.masterChange})`);
       try {
         await this.syncCashReceipt(updated, user, headers);
       } catch (err) {
@@ -785,8 +787,10 @@ export class OrdersService {
 
     // ✅ ИСПРАВЛЕНИЕ: Синхронная отправка в cash-service для гарантии записи
     // Т.к. сервисы на одном сервере, задержка минимальная (~10-50ms)
-    if (status === 'Готово' && updated.result && Number(updated.result) > 0) {
-      this.logger.log(`Order #${updated.id} status -> Готово, syncing cash (sync)`);
+    // 🔧 FIX: Проверяем masterChange > 0, т.к. приход создается на эту сумму
+    // Если masterChange = 0, приход не создаем (нет денег для кассы)
+    if (status === 'Готово' && updated.masterChange && Number(updated.masterChange) > 0) {
+      this.logger.log(`Order #${updated.id} status -> Готово, syncing cash (masterChange=${updated.masterChange})`);
       try {
         await this.syncCashReceipt(updated, user, headers);
       } catch (err) {
