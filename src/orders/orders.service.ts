@@ -1101,7 +1101,7 @@ export class OrdersService {
       await this.prisma.ensureConnection();
 
       // ✅ FIX: Выполняем запрос с retry логикой для обработки idle-session timeout
-      const executeQueries = async (attempt: number = 1): Promise<[Array<{ rk: string }>, Array<{ type_equipment: string }>]> => {
+      const executeQueries = async (attempt: number = 1): Promise<[Array<{ rk: string }>, Array<{ type_equipment: string }>, Array<{ city: string }>]> => {
         const queryStartTime = Date.now();
         
         const queryPromise = Promise.all([
@@ -1119,6 +1119,14 @@ export class OrdersService {
             ...params
           ).then(result => {
             this.logger.debug(`[getFilterOptions] Equipment query completed in ${Date.now() - queryStartTime}ms, rows: ${result.length}`);
+            return result;
+          }),
+          // Уникальные города
+          this.prisma.$queryRawUnsafe<Array<{ city: string }>>(
+            `SELECT DISTINCT city FROM orders ${whereClause} ${additionalWhere} city IS NOT NULL ORDER BY city ASC`,
+            ...params
+          ).then(result => {
+            this.logger.debug(`[getFilterOptions] City query completed in ${Date.now() - queryStartTime}ms, rows: ${result.length}`);
             return result;
           }),
         ]);
@@ -1148,11 +1156,12 @@ export class OrdersService {
         }
       };
 
-      const [rksResult, typeEquipmentsResult] = await executeQueries();
+      const [rksResult, typeEquipmentsResult, citiesResult] = await executeQueries();
 
       const result = {
         rks: rksResult.map(r => r.rk),
         typeEquipments: typeEquipmentsResult.map(t => t.type_equipment),
+        cities: citiesResult.map(c => c.city),
       };
 
       // ✅ Сохраняем в кэш
@@ -1163,7 +1172,7 @@ export class OrdersService {
       this.logger.debug(`[getFilterOptions] Cached result for key=${cacheKey}`);
 
       const duration = Date.now() - startTime;
-      this.logger.debug(`[getFilterOptions] COMPLETE in ${duration}ms (RKs: ${rksResult.length}, Equipment: ${typeEquipmentsResult.length})`);
+      this.logger.debug(`[getFilterOptions] COMPLETE in ${duration}ms (RKs: ${rksResult.length}, Equipment: ${typeEquipmentsResult.length}, Cities: ${citiesResult.length})`);
 
       if (duration > 1000) {
         this.logger.warn(`[getFilterOptions] SLOW QUERY: ${duration}ms`);
