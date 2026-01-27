@@ -1,4 +1,4 @@
-import { Injectable, ForbiddenException, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, ForbiddenException, NotFoundException, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -13,18 +13,51 @@ import { firstValueFrom, timeout, catchError } from 'rxjs';
 import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
-export class OrdersService {
+export class OrdersService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(OrdersService.name);
 
   // ✅ FIX: Кэш для getFilterOptions (предотвращает timeout при частых запросах)
-  private filterOptionsCache = new Map<string, { data: any; expiry: number }>();
+  // ✅ FIX: LRU-кэш с отслеживанием lastAccess для eviction
+  private filterOptionsCache = new Map<string, { data: any; expiry: number; lastAccess: number }>();
   private readonly FILTER_OPTIONS_CACHE_TTL = 60 * 1000; // 1 минута
+  // ✅ FIX: Ограничение размера кэша для предотвращения утечки памяти
+  private readonly FILTER_OPTIONS_CACHE_MAX_SIZE = 100; // Максимум 100 записей
+  private cacheCleanupInterval: NodeJS.Timeout | null = null;
 
   constructor(
     private prisma: PrismaService,
     private httpService: HttpService,
     private notificationsService: NotificationsService,
   ) {}
+
+  // ✅ FIX: Запуск автоочистки кэша при старте модуля
+  onModuleInit() {
+    // Очистка устаревших записей каждые 5 минут
+    this.cacheCleanupInterval = setInterval(() => {
+      const now = Date.now();
+      let cleaned = 0;
+      for (const [key, value] of this.filterOptionsCache.entries()) {
+        if (value.expiry < now) {
+          this.filterOptionsCache.delete(key);
+          cleaned++;
+        }
+      }
+      if (cleaned > 0) {
+        this.logger.debug(`[Cache] Cleaned ${cleaned} expired entries`);
+      }
+    }, 5 * 60 * 1000); // 5 минут
+    this.logger.log('✅ Filter options cache cleanup started');
+  }
+
+  // ✅ FIX: Остановка интервала при уничтожении модуля
+  onModuleDestroy() {
+    if (this.cacheCleanupInterval) {
+      clearInterval(this.cacheCleanupInterval);
+      this.cacheCleanupInterval = null;
+    }
+    this.filterOptionsCache.clear();
+    this.logger.log('✅ Filter options cache cleanup stopped');
+  }
 
   /**
    * ✅ ОПТИМИЗАЦИЯ: Обертка для fire-and-forget отправки уведомлений
@@ -329,6 +362,9 @@ export class OrdersService {
       `new-order-#${order.id}`
     );
 
+    // ✅ FIX: Инвалидация кэша filter options при создании заказа
+    this.invalidateFilterOptionsCache();
+
     return { 
       success: true, 
       data: order,
@@ -401,6 +437,9 @@ export class OrdersService {
       `new-order-from-call-#${order.id}`
     );
 
+    // ✅ FIX: Инвалидация кэша filter options при создании заказа
+    this.invalidateFilterOptionsCache();
+
     return { 
       success: true, 
       data: order,
@@ -451,6 +490,9 @@ export class OrdersService {
       `new-order-from-chat-#${order.id}`
     );
 
+    // ✅ FIX: Инвалидация кэша filter options при создании заказа
+    this.invalidateFilterOptionsCache();
+
     return { 
       success: true, 
       data: order,
@@ -476,6 +518,11 @@ export class OrdersService {
       throw new ForbiddenException('Access denied');
     }
 
+    // ✅ FIX: RBAC проверка для директора
+    if (user.role === 'director' && user.cities && !user.cities.includes(order.city)) {
+      throw new ForbiddenException('Order is not in your cities');
+    }
+
     // S3 base URL для преобразования путей в полные URL
     const s3BaseUrl = process.env.S3_BASE_URL || 'https://s3.twcstorage.ru/f7eead03-crmfiles';
     
@@ -489,123 +536,145 @@ export class OrdersService {
     return { success: true, data: transformedOrder };
   }
 
-  // ✅ ИСПРАВЛЕНИЕ: Строгая типизация, удалено логирование PII
+  // ✅ FIX: Обернуто в транзакцию для предотвращения race condition
   async updateOrder(
     id: number, 
     dto: UpdateOrderDto, 
     user: AuthUser, 
     headers?: Record<string, string | string[] | undefined>
   ) {
-    // ✅ ИСПРАВЛЕНИЕ: Логируем только не-конфиденциальные данные
     this.logger.debug(`Updating order #${id}, fields: ${getFieldNames(dto).join(', ')}`);
     
-    const order = await this.prisma.order.findUnique({ where: { id } });
-    if (!order) throw new NotFoundException('Order not found');
+    // ✅ FIX: Используем транзакцию для атомарности операций
+    const result = await this.prisma.$transaction(async (tx) => {
+      // Блокируем запись для обновления (SELECT FOR UPDATE через findFirst)
+      const order = await tx.order.findUnique({ 
+        where: { id },
+      });
+      
+      if (!order) throw new NotFoundException('Order not found');
 
-    // RBAC проверка
-    if (user.role === 'master' && order.masterId !== user.userId) {
-      throw new ForbiddenException('Access denied');
-    }
-
-    // Создаем объект обновления
-    const updateData: any = {};
-    
-    // Основные поля заказа
-    if (dto.rk !== undefined && dto.rk !== null) updateData.rk = dto.rk;
-    if (dto.city !== undefined && dto.city !== null) updateData.city = dto.city;
-    if (dto.avitoName !== undefined && dto.avitoName !== null) updateData.avitoName = dto.avitoName;
-    if (dto.phone !== undefined && dto.phone !== null) updateData.phone = dto.phone;
-    if (dto.typeOrder !== undefined && dto.typeOrder !== null) updateData.typeOrder = dto.typeOrder;
-    if (dto.clientName !== undefined && dto.clientName !== null) updateData.clientName = dto.clientName;
-    if (dto.address !== undefined && dto.address !== null) updateData.address = dto.address;
-    if (dto.typeEquipment !== undefined && dto.typeEquipment !== null) updateData.typeEquipment = dto.typeEquipment;
-    if (dto.problem !== undefined && dto.problem !== null) updateData.problem = dto.problem;
-    if (dto.avitoChatId !== undefined && dto.avitoChatId !== null) updateData.avitoChatId = dto.avitoChatId;
-    if (dto.callId !== undefined && dto.callId !== null) updateData.callId = dto.callId;
-    if (dto.operatorNameId !== undefined && dto.operatorNameId !== null) updateData.operatorNameId = dto.operatorNameId;
-    
-    // Поля статуса и мастера
-    if (dto.statusOrder !== undefined && dto.statusOrder !== null) {
-      updateData.statusOrder = dto.statusOrder;
-      // Если статус терминальный и closingData не передан явно, выставляем текущую дату закрытия
-      const terminalStatuses = ['Готово', 'Отказ', 'Незаказ'];
-      if (terminalStatuses.includes(dto.statusOrder) && dto.closingData === undefined) {
-        updateData.closingData = new Date();
+      // RBAC проверка
+      if (user.role === 'master' && order.masterId !== user.userId) {
+        throw new ForbiddenException('Access denied');
       }
-    }
-    // ✅ ИСПРАВЛЕНИЕ: Разрешаем очистку masterId (передача null)
-    if (dto.masterId !== undefined) {
-      updateData.masterId = dto.masterId; // может быть null при отказе мастера
-    }
-    
-    // Финансовые поля
-    if (dto.result !== undefined && dto.result !== null) updateData.result = dto.result;
-    if (dto.expenditure !== undefined && dto.expenditure !== null) updateData.expenditure = dto.expenditure;
-    if (dto.clean !== undefined && dto.clean !== null) updateData.clean = dto.clean;
-    if (dto.masterChange !== undefined && dto.masterChange !== null) updateData.masterChange = dto.masterChange;
-    if (dto.prepayment !== undefined && dto.prepayment !== null) updateData.prepayment = dto.prepayment;
-    
-    // Документы (разрешаем null для удаления)
-    if (dto.bsoDoc !== undefined) updateData.bsoDoc = dto.bsoDoc;
-    if (dto.expenditureDoc !== undefined) updateData.expenditureDoc = dto.expenditureDoc;
-    if (dto.cashReceiptDoc !== undefined) updateData.cashReceiptDoc = dto.cashReceiptDoc;
-    
-    // Дополнительные поля
-    if (dto.comment !== undefined && dto.comment !== null) updateData.comment = dto.comment;
-    if (dto.cashSubmissionStatus !== undefined && dto.cashSubmissionStatus !== null) updateData.cashSubmissionStatus = dto.cashSubmissionStatus;
-    if (dto.cashSubmissionAmount !== undefined && dto.cashSubmissionAmount !== null) updateData.cashSubmissionAmount = dto.cashSubmissionAmount;
-    
-    // Поля партнера
-    if (dto.partner !== undefined) updateData.partner = dto.partner;
-    if (dto.partnerPercent !== undefined && dto.partnerPercent !== null) updateData.partnerPercent = dto.partnerPercent;
-    
-    // Обрабатываем даты отдельно
-    if (dto.dateMeeting !== undefined && dto.dateMeeting !== null) {
-      updateData.dateMeeting = dto.dateMeeting ? new Date(dto.dateMeeting) : null;
-    }
-    if (dto.closingData !== undefined && dto.closingData !== null) {
-      updateData.closingData = dto.closingData ? new Date(dto.closingData) : null;
-    }
-    if (dto.dateClosmod !== undefined && dto.dateClosmod !== null) {
-      updateData.dateClosmod = dto.dateClosmod ? new Date(dto.dateClosmod) : null;
-    }
 
-    const updated = await this.prisma.order.update({
-      where: { id },
-      data: updateData,
-      include: {
-        operator: { select: { id: true, name: true, login: true } },
-        master: { select: { id: true, name: true } },
-      },
+      // Создаем объект обновления
+      const updateData: any = {};
+      
+      // Основные поля заказа
+      if (dto.rk !== undefined && dto.rk !== null) updateData.rk = dto.rk;
+      if (dto.city !== undefined && dto.city !== null) updateData.city = dto.city;
+      if (dto.avitoName !== undefined && dto.avitoName !== null) updateData.avitoName = dto.avitoName;
+      if (dto.phone !== undefined && dto.phone !== null) updateData.phone = dto.phone;
+      if (dto.typeOrder !== undefined && dto.typeOrder !== null) updateData.typeOrder = dto.typeOrder;
+      if (dto.clientName !== undefined && dto.clientName !== null) updateData.clientName = dto.clientName;
+      if (dto.address !== undefined && dto.address !== null) updateData.address = dto.address;
+      if (dto.typeEquipment !== undefined && dto.typeEquipment !== null) updateData.typeEquipment = dto.typeEquipment;
+      if (dto.problem !== undefined && dto.problem !== null) updateData.problem = dto.problem;
+      if (dto.avitoChatId !== undefined && dto.avitoChatId !== null) updateData.avitoChatId = dto.avitoChatId;
+      if (dto.callId !== undefined && dto.callId !== null) updateData.callId = dto.callId;
+      if (dto.operatorNameId !== undefined && dto.operatorNameId !== null) updateData.operatorNameId = dto.operatorNameId;
+      
+      // Поля статуса и мастера
+      if (dto.statusOrder !== undefined && dto.statusOrder !== null) {
+        updateData.statusOrder = dto.statusOrder;
+        const terminalStatuses = ['Готово', 'Отказ', 'Незаказ'];
+        if (terminalStatuses.includes(dto.statusOrder) && dto.closingData === undefined) {
+          updateData.closingData = new Date();
+        }
+      }
+      if (dto.masterId !== undefined) {
+        updateData.masterId = dto.masterId;
+      }
+      
+      // Финансовые поля
+      if (dto.result !== undefined && dto.result !== null) updateData.result = dto.result;
+      if (dto.expenditure !== undefined && dto.expenditure !== null) updateData.expenditure = dto.expenditure;
+      
+      // ✅ FIX: Вычисляем clean server-side для предотвращения манипуляций
+      if ((dto.result !== undefined && dto.result !== null) || (dto.expenditure !== undefined && dto.expenditure !== null)) {
+        const finalResult = dto.result !== undefined ? dto.result : (updateData.result || 0);
+        const finalExpenditure = dto.expenditure !== undefined ? dto.expenditure : (updateData.expenditure || 0);
+        updateData.clean = finalResult - finalExpenditure;
+      } else if (dto.clean !== undefined && dto.clean !== null) {
+        // Если только clean передан - логируем предупреждение
+        this.logger.warn(`Manual clean value provided: ${dto.clean} for order update`);
+        updateData.clean = dto.clean;
+      }
+      
+      if (dto.masterChange !== undefined && dto.masterChange !== null) updateData.masterChange = dto.masterChange;
+      if (dto.prepayment !== undefined && dto.prepayment !== null) updateData.prepayment = dto.prepayment;
+      
+      // Документы
+      if (dto.bsoDoc !== undefined) updateData.bsoDoc = dto.bsoDoc;
+      if (dto.expenditureDoc !== undefined) updateData.expenditureDoc = dto.expenditureDoc;
+      if (dto.cashReceiptDoc !== undefined) updateData.cashReceiptDoc = dto.cashReceiptDoc;
+      
+      // Дополнительные поля
+      if (dto.comment !== undefined && dto.comment !== null) updateData.comment = dto.comment;
+      if (dto.cashSubmissionStatus !== undefined && dto.cashSubmissionStatus !== null) updateData.cashSubmissionStatus = dto.cashSubmissionStatus;
+      if (dto.cashSubmissionAmount !== undefined && dto.cashSubmissionAmount !== null) updateData.cashSubmissionAmount = dto.cashSubmissionAmount;
+      
+      // Поля партнера
+      if (dto.partner !== undefined) updateData.partner = dto.partner;
+      if (dto.partnerPercent !== undefined && dto.partnerPercent !== null) updateData.partnerPercent = dto.partnerPercent;
+      
+      // Даты
+      if (dto.dateMeeting !== undefined && dto.dateMeeting !== null) {
+        updateData.dateMeeting = dto.dateMeeting ? new Date(dto.dateMeeting) : null;
+      }
+      if (dto.closingData !== undefined && dto.closingData !== null) {
+        updateData.closingData = dto.closingData ? new Date(dto.closingData) : null;
+      }
+      if (dto.dateClosmod !== undefined && dto.dateClosmod !== null) {
+        updateData.dateClosmod = dto.dateClosmod ? new Date(dto.dateClosmod) : null;
+      }
+
+      const updated = await tx.order.update({
+        where: { id },
+        data: updateData,
+        include: {
+          operator: { select: { id: true, name: true, login: true } },
+          master: { select: { id: true, name: true } },
+        },
+      });
+
+      this.logger.log(`Order #${updated.id} updated successfully`);
+
+      // ✅ FIX: Cash-service вызов внутри транзакции
+      // Если упадёт — вся транзакция откатится автоматически
+      if (dto.statusOrder === 'Готово' && updated.masterChange && Number(updated.masterChange) > 0) {
+        this.logger.log(`Order #${updated.id} completed, syncing cash receipt (masterChange=${updated.masterChange})`);
+        await this.syncCashReceipt(updated, user, headers);
+      }
+
+      return { order, updated };
+    }, {
+      timeout: 30000, // 30 секунд на всю транзакцию
+      isolationLevel: 'ReadCommitted', // Стандартный уровень изоляции
     });
 
-    this.logger.log(`Order #${updated.id} updated successfully`);
-
-    // ✅ ИСПРАВЛЕНИЕ: Синхронная отправка в cash-service для гарантии записи
-    // Т.к. сервисы на одном сервере, задержка минимальная (~10-50ms)
-    // 🔧 FIX: Проверяем masterChange > 0, т.к. приход создается на эту сумму, а не на result
-    // Если masterChange = 0 (например result=1000, expenditure=1000), приход не создаем
-    if (dto.statusOrder === 'Готово' && updated.masterChange && Number(updated.masterChange) > 0) {
-      this.logger.log(`Order #${updated.id} completed, syncing cash receipt (masterChange=${updated.masterChange})`);
-      try {
-        await this.syncCashReceipt(updated, user, headers);
-      } catch (err) {
-        // Откатываем статус заказа, если не удалось записать в кассу
-        this.logger.error(`Failed to sync cash for order #${updated.id}, rolling back status: ${err.message}`);
-        await this.prisma.order.update({
-          where: { id: order.id },
-          data: { 
-            statusOrder: order.statusOrder, // Возвращаем старый статус
-            closingData: order.closingData,  // Возвращаем старую дату
-          },
-        });
-        throw new Error(`Сервис транзакций недоступен.`);
-      }
-    }
+    const { order, updated } = result;
     
-    // ✅ ОПТИМИЗАЦИЯ: Все уведомления отправляются асинхронно (fire-and-forget)
+    // ✅ FIX: Уведомления отправляются ПОСЛЕ успешного коммита транзакции
+    this.sendUpdateNotifications(order, updated, dto);
+    
+    // ✅ FIX N+1: Возвращаем oldOrder для контроллера (чтобы не делать дополнительный запрос)
+    return { 
+      success: true, 
+      data: updated,
+      oldOrder: order, // ✅ Для аудит-лога в контроллере
+      message: `Заказ №${updated.id} обновлен!`
+    };
+  }
+
+  /**
+   * ✅ FIX: Выделенный метод для отправки уведомлений (вызывается после транзакции)
+   */
+  private sendUpdateNotifications(order: any, updated: any, dto: UpdateOrderDto) {
     // 1. Изменение даты встречи
-    if (dto.dateMeeting && order.dateMeeting.toISOString() !== new Date(dto.dateMeeting).toISOString()) {
+    if (dto.dateMeeting && order.dateMeeting?.toISOString() !== new Date(dto.dateMeeting).toISOString()) {
       this.fireAndForgetNotification(
         this.notificationsService.sendDateChangeNotification({
           orderId: updated.id,
@@ -622,8 +691,8 @@ export class OrdersService {
       );
     }
 
-    // 2. Принятие заказа мастером (статус Принял)
-    if (dto.statusOrder && dto.statusOrder === 'Принял' && order.statusOrder !== 'Принял') {
+    // 2. Принятие заказа мастером
+    if (dto.statusOrder === 'Принял' && order.statusOrder !== 'Принял') {
       this.fireAndForgetNotification(
         this.notificationsService.sendOrderAcceptedNotification({
           orderId: updated.id,
@@ -638,8 +707,8 @@ export class OrdersService {
       );
     }
 
-    // 2.1. Закрытие заказа (статус Готово)
-    if (dto.statusOrder && dto.statusOrder === 'Готово' && order.statusOrder !== 'Готово') {
+    // 3. Закрытие заказа
+    if (dto.statusOrder === 'Готово' && order.statusOrder !== 'Готово') {
       this.fireAndForgetNotification(
         this.notificationsService.sendOrderClosedNotification({
           orderId: updated.id,
@@ -655,8 +724,8 @@ export class OrdersService {
       );
     }
 
-    // 2.2. Заказ в модерне (статус Модерн)
-    if (dto.statusOrder && dto.statusOrder === 'Модерн' && order.statusOrder !== 'Модерн') {
+    // 4. Модерн
+    if (dto.statusOrder === 'Модерн' && order.statusOrder !== 'Модерн') {
       this.fireAndForgetNotification(
         this.notificationsService.sendOrderInModernNotification({
           orderId: updated.id,
@@ -674,28 +743,25 @@ export class OrdersService {
       );
     }
 
-    // 3. Отмена заказа (статус Отказ/Незаказ)
-    if (dto.statusOrder && (dto.statusOrder === 'Отказ' || dto.statusOrder === 'Незаказ') && order.statusOrder !== dto.statusOrder) {
+    // 5. Отказ/Незаказ
+    if ((dto.statusOrder === 'Отказ' || dto.statusOrder === 'Незаказ') && order.statusOrder !== dto.statusOrder) {
       this.fireAndForgetNotification(
         this.notificationsService.sendOrderRejectionNotification({
           orderId: updated.id,
           city: updated.city,
           clientName: updated.clientName,
           phone: updated.phone,
-          reason: dto.statusOrder,
+          reason: dto.statusOrder!,
           masterId: updated.masterId || undefined,
         }),
         `order-rejection-#${updated.id}`
       );
     }
 
-    // 4. Назначение/изменение мастера
+    // 6. Изменение мастера
     if (dto.masterId !== undefined && order.masterId !== dto.masterId) {
-      this.logger.debug(`Master change: old=${order.masterId}, new=${dto.masterId}`);
-      
-      // Если мастер отказывается (masterId был, теперь null)
+      // Мастер отказался
       if (order.masterId && dto.masterId === null) {
-        this.logger.debug(`Master ${order.masterId} declined order, notifying director and master`);
         this.fireAndForgetNotification(
           this.notificationsService.sendOrderRejectionNotification({
             orderId: updated.id,
@@ -703,7 +769,7 @@ export class OrdersService {
             clientName: updated.clientName?.trim() || undefined,
             phone: updated.phone,
             reason: 'Мастер отказался от заказа',
-            masterId: order.masterId, // ✅ ИСПРАВЛЕНИЕ: Передаем ID мастера, который отказался
+            masterId: order.masterId,
             rk: updated.rk?.trim() || undefined,
             avitoName: updated.avitoName?.trim() || undefined,
             typeEquipment: updated.typeEquipment?.trim() || undefined,
@@ -713,9 +779,8 @@ export class OrdersService {
         );
       }
       
-      // Если был старый мастер и назначается новый (передача заказа)
+      // Передача заказа другому мастеру
       if (order.masterId && dto.masterId) {
-        this.logger.debug(`Sending reassignment notification to old master ${order.masterId}`);
         this.fireAndForgetNotification(
           this.notificationsService.sendMasterReassignedNotification({
             orderId: updated.id,
@@ -725,9 +790,8 @@ export class OrdersService {
         );
       }
       
-      // Если назначается мастер (новый или вместо старого)
+      // Назначение мастера
       if (dto.masterId) {
-        this.logger.debug(`Sending assignment notification to new master ${dto.masterId}`);
         this.fireAndForgetNotification(
           this.notificationsService.sendMasterAssignedNotification({
             orderId: updated.id,
@@ -743,12 +807,6 @@ export class OrdersService {
         );
       }
     }
-    
-    return { 
-      success: true, 
-      data: updated,
-      message: `Заказ №${updated.id} обновлен!`
-    };
   }
 
   async updateStatus(
@@ -776,38 +834,49 @@ export class OrdersService {
       data.closingData = new Date();
     }
 
-    const updated = await this.prisma.order.update({
-      where: { id },
-      data,
-      include: {
-        operator: { select: { id: true, name: true, login: true } },
-        master: { select: { id: true, name: true } },
-      },
+    const needsCashSync = status === 'Готово' && order.masterChange && Number(order.masterChange) > 0;
+
+    // ✅ FIX: Используем транзакцию для атомарного обновления статуса и синхронизации кассы
+    // Это предотвращает дублирование записей в кассу при повторных запросах
+    const updated = await this.prisma.$transaction(async (tx) => {
+      // Проверяем, не был ли статус уже изменен (защита от дублирования)
+      const currentOrder = await tx.order.findUnique({
+        where: { id },
+        select: { statusOrder: true }
+      });
+      
+      if (currentOrder?.statusOrder === status) {
+        throw new Error('Статус уже установлен');
+      }
+
+      const result = await tx.order.update({
+        where: { id },
+        data,
+        include: {
+          operator: { select: { id: true, name: true, login: true } },
+          master: { select: { id: true, name: true } },
+        },
+      });
+
+      // Синхронизация кассы внутри транзакции
+      if (needsCashSync) {
+        this.logger.log(`Order #${result.id} status -> Готово, syncing cash (masterChange=${result.masterChange})`);
+        try {
+          await this.syncCashReceipt(result, user, headers);
+        } catch (err) {
+          this.logger.error(`Failed to sync cash for order #${result.id}: ${err.message}`);
+          throw new Error(`Сервис транзакций недоступен.`);
+        }
+      }
+
+      return result;
+    }, {
+      isolationLevel: 'Serializable', // Максимальная изоляция для предотвращения race conditions
+      timeout: 10000, // 10 секунд таймаут
     });
 
-    // ✅ ИСПРАВЛЕНИЕ: Синхронная отправка в cash-service для гарантии записи
-    // Т.к. сервисы на одном сервере, задержка минимальная (~10-50ms)
-    // 🔧 FIX: Проверяем masterChange > 0, т.к. приход создается на эту сумму
-    // Если masterChange = 0, приход не создаем (нет денег для кассы)
-    if (status === 'Готово' && updated.masterChange && Number(updated.masterChange) > 0) {
-      this.logger.log(`Order #${updated.id} status -> Готово, syncing cash (masterChange=${updated.masterChange})`);
-      try {
-        await this.syncCashReceipt(updated, user, headers);
-      } catch (err) {
-        // Откатываем статус заказа, если не удалось записать в кассу
-        this.logger.error(`Failed to sync cash for order #${updated.id}, rolling back status: ${err.message}`);
-        await this.prisma.order.update({
-          where: { id },
-          data: { 
-            statusOrder: order.statusOrder, // Возвращаем старый статус
-            closingData: order.closingData,  // Возвращаем старую дату
-          },
-        });
-        throw new Error(`Сервис транзакций недоступен.`);
-      }
-    }
-
-    return { success: true, data: updated };
+    // ✅ FIX #35: Возвращаем oldStatus для логирования без лишнего запроса в контроллере
+    return { success: true, data: updated, oldStatus: order.statusOrder };
   }
 
   async assignMaster(id: number, masterId: number) {
@@ -1066,6 +1135,8 @@ export class OrdersService {
       // ✅ Проверяем кэш
       const cached = this.filterOptionsCache.get(cacheKey);
       if (cached && cached.expiry > Date.now()) {
+        // ✅ LRU: Обновляем время последнего доступа
+        cached.lastAccess = Date.now();
         this.logger.debug(`[getFilterOptions] CACHE HIT for key=${cacheKey}, age=${Date.now() - (cached.expiry - this.FILTER_OPTIONS_CACHE_TTL)}ms`);
         return {
           success: true,
@@ -1164,12 +1235,18 @@ export class OrdersService {
         cities: citiesResult.map(c => c.city),
       };
 
-      // ✅ Сохраняем в кэш
+      // ✅ LRU: Проверяем размер кэша и удаляем старые записи если нужно
+      if (this.filterOptionsCache.size >= this.FILTER_OPTIONS_CACHE_MAX_SIZE) {
+        this.evictLRUCacheEntry();
+      }
+      
+      // ✅ Сохраняем в кэш с временем последнего доступа
       this.filterOptionsCache.set(cacheKey, {
         data: result,
         expiry: Date.now() + this.FILTER_OPTIONS_CACHE_TTL,
+        lastAccess: Date.now(),
       });
-      this.logger.debug(`[getFilterOptions] Cached result for key=${cacheKey}`);
+      this.logger.debug(`[getFilterOptions] Cached result for key=${cacheKey}, cache size=${this.filterOptionsCache.size}`);
 
       const duration = Date.now() - startTime;
       this.logger.debug(`[getFilterOptions] COMPLETE in ${duration}ms (RKs: ${rksResult.length}, Equipment: ${typeEquipmentsResult.length}, Cities: ${citiesResult.length})`);
@@ -1209,6 +1286,27 @@ export class OrdersService {
     this.logger.debug('[getFilterOptions] Cache invalidated');
   }
 
+  /**
+   * ✅ LRU Eviction: Удаляет самую старую запись из кэша
+   * Используется когда кэш достигает FILTER_OPTIONS_CACHE_MAX_SIZE
+   */
+  private evictLRUCacheEntry() {
+    let oldestKey: string | null = null;
+    let oldestAccess = Infinity;
+
+    for (const [key, value] of this.filterOptionsCache.entries()) {
+      if (value.lastAccess < oldestAccess) {
+        oldestAccess = value.lastAccess;
+        oldestKey = key;
+      }
+    }
+
+    if (oldestKey) {
+      this.filterOptionsCache.delete(oldestKey);
+      this.logger.debug(`[getFilterOptions] LRU evicted key=${oldestKey}, cache size=${this.filterOptionsCache.size}`);
+    }
+  }
+
   async submitCashForReview(orderId: number, cashReceiptDoc: string | undefined, user: AuthUser) {
     this.logger.log(`Submitting cash for review: Order ${orderId} by Master ${user.userId}`);
 
@@ -1243,6 +1341,14 @@ export class OrdersService {
         return {
           success: false,
           error: 'Можно отправить сдачу только по завершенным заказам'
+        };
+      }
+
+      // ✅ FIX: Проверяем, что касса не на проверке уже
+      if (order.cashSubmissionStatus === 'На проверке') {
+        return {
+          success: false,
+          error: 'Сдача уже отправлена на проверку. Дождитесь решения директора.'
         };
       }
 

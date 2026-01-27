@@ -92,12 +92,14 @@ export class UpdateOrderDto {
   @IsIn(['Ожидает', 'Принял', 'В пути', 'В работе', 'Готово', 'Отказ', 'Модерн', 'Незаказ'])
   statusOrder?: string;
 
-  @ApiProperty({ required: false, description: 'ID мастера' })
+  // ✅ FIX: Разрешаем null для снятия мастера с заказа
+  @ApiProperty({ required: false, description: 'ID мастера (null для снятия)', nullable: true })
+  @ValidateIf((o) => o.masterId !== null)
   @Type(() => Number)
   @IsNumber()
   @IsOptional()
   @Min(1)
-  masterId?: number;
+  masterId?: number | null;
   
   // Финансовые поля
   @ApiProperty({ required: false, description: 'Итоговая сумма' })

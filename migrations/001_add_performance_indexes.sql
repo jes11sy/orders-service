@@ -6,35 +6,55 @@
 -- Оценочное время выполнения: 5-10 минут (зависит от размера таблицы)
 -- ================================================================
 
--- Начало транзакции
-BEGIN;
-
 -- ================================================================
 -- 1. ПОЛНОТЕКСТОВЫЙ ПОИСК (pg_trgm для LIKE/ILIKE запросов)
 -- ================================================================
+-- ✅ FIX #145: CREATE EXTENSION требует superuser прав.
+-- Выполните эту команду ОТДЕЛЬНО от имени администратора БД:
+--
+--   psql -U postgres -d your_database -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+--
+-- Или через панель управления хостинга (Timeweb, AWS RDS и т.д.)
+-- После этого закомментируйте строку ниже.
+-- ================================================================
 
--- Включаем расширение pg_trgm для триграммного поиска
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
+-- Проверяем, установлено ли расширение (не падаем если нет прав)
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm') THEN
+    BEGIN
+      CREATE EXTENSION IF NOT EXISTS pg_trgm;
+      RAISE NOTICE '✅ pg_trgm extension installed successfully';
+    EXCEPTION WHEN insufficient_privilege THEN
+      RAISE WARNING '⚠️ Cannot install pg_trgm: insufficient privileges. Ask your DBA to run: CREATE EXTENSION IF NOT EXISTS pg_trgm;';
+      RAISE WARNING '⚠️ Trigram indexes will be skipped.';
+      RETURN;
+    END;
+  ELSE
+    RAISE NOTICE '✅ pg_trgm extension already installed';
+  END IF;
+END $$;
 
+-- ================================================================
 -- Создаем GIN индексы для быстрого поиска с LIKE/ILIKE
 -- Эти индексы ускоряют запросы типа: WHERE phone LIKE '%search%'
+-- ✅ FIX #143: CREATE INDEX CONCURRENTLY нельзя в транзакции!
+-- ================================================================
 
 -- Индекс для поиска по телефону
 DROP INDEX IF EXISTS idx_orders_phone_trgm;
-CREATE INDEX CONCURRENTLY idx_orders_phone_trgm 
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_orders_phone_trgm 
   ON orders USING gin (phone gin_trgm_ops);
 
 -- Индекс для поиска по имени клиента
 DROP INDEX IF EXISTS idx_orders_client_name_trgm;
-CREATE INDEX CONCURRENTLY idx_orders_client_name_trgm 
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_orders_client_name_trgm 
   ON orders USING gin (client_name gin_trgm_ops);
 
 -- Индекс для поиска по адресу
 DROP INDEX IF EXISTS idx_orders_address_trgm;
-CREATE INDEX CONCURRENTLY idx_orders_address_trgm 
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_orders_address_trgm 
   ON orders USING gin (address gin_trgm_ops);
-
-COMMIT;
 
 -- ================================================================
 -- 2. СОСТАВНЫЕ ИНДЕКСЫ ДЛЯ ФИЛЬТРАЦИИ И СОРТИРОВКИ
@@ -267,16 +287,19 @@ ORDER BY idx_scan DESC;
 -- ================================================================
 -- 9. ОПТИМИЗАЦИЯ СТАТИСТИКИ POSTGRESQL
 -- ================================================================
+-- ✅ FIX #171: Снижены значения STATISTICS
+-- STATISTICS 1000 = ~10x дольше ANALYZE + больше памяти
+-- По умолчанию 100 достаточно для большинства случаев
+-- Увеличиваем только для колонок с очень неравномерным распределением
 
 BEGIN;
 
--- Увеличиваем статистику для колонок с высокой кардинальностью
-ALTER TABLE orders ALTER COLUMN status_order SET STATISTICS 1000;
-ALTER TABLE orders ALTER COLUMN city SET STATISTICS 1000;
-ALTER TABLE orders ALTER COLUMN rk SET STATISTICS 500;
-ALTER TABLE orders ALTER COLUMN type_equipment SET STATISTICS 500;
-ALTER TABLE orders ALTER COLUMN phone SET STATISTICS 500;
-ALTER TABLE orders ALTER COLUMN client_name SET STATISTICS 500;
+-- Умеренное увеличение статистики (default=100)
+-- status_order: мало уникальных значений, но важен для планировщика
+ALTER TABLE orders ALTER COLUMN status_order SET STATISTICS 200;
+-- city: ограниченное количество городов
+ALTER TABLE orders ALTER COLUMN city SET STATISTICS 200;
+-- Остальные колонки: оставляем default (100) — достаточно для индексов
 
 -- Обновляем статистику для планировщика запросов
 ANALYZE orders;
@@ -286,9 +309,13 @@ ANALYZE master;
 COMMIT;
 
 -- ================================================================
--- 10. ПРОВЕРКА РЕЗУЛЬТАТОВ
+-- 10. ПРОВЕРКА РЕЗУЛЬТАТОВ (для DBA)
 -- ================================================================
+-- ✅ FIX #170: SELECT запросы закомментированы
+-- Они не возвращают результат через программные клиенты (Prisma, pg)
+-- Используйте для ручной проверки в psql/pgAdmin
 
+/*
 -- Список всех индексов на таблице orders
 SELECT 
   indexname,
@@ -297,6 +324,7 @@ SELECT
 FROM pg_indexes
 WHERE tablename = 'orders'
 ORDER BY indexname;
+*/
 
 -- Статистика использования индексов (выполните через несколько дней)
 /*

@@ -2,6 +2,9 @@
 -- Проблема: В БД сохранялись полные signed URLs вместо ключей
 -- Решение: Извлечь только путь к файлу из URL
 
+-- ✅ FIX #143: Обёртка в транзакцию для атомарности
+BEGIN;
+
 -- Функция для извлечения пути из URL
 CREATE OR REPLACE FUNCTION extract_s3_key(url TEXT) RETURNS TEXT AS $$
 BEGIN
@@ -104,4 +107,7 @@ DROP FUNCTION IF EXISTS extract_s3_key(TEXT);
 -- Добавляем комментарий
 COMMENT ON COLUMN "orders"."bso_doc" IS 'Массив КЛЮЧЕЙ файлов БСО (НЕ URL!). Формат: director/orders/bso_doc/xxx.jpg';
 COMMENT ON COLUMN "orders"."expenditure_doc" IS 'Массив КЛЮЧЕЙ файлов расходов (НЕ URL!). Формат: director/orders/expenditure_doc/xxx.jpg';
+
+-- ✅ FIX #143: Завершение транзакции
+COMMIT;
 

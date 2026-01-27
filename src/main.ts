@@ -8,9 +8,19 @@ import { GlobalExceptionFilter } from './filters/global-exception.filter';
 import { PrismaService } from './prisma/prisma.service';
 
 async function bootstrap() {
+  const isProduction = process.env.NODE_ENV === 'production';
+  
+  // ✅ FIX #86: Фильтрация уровней логов в production
+  const logLevels: ('log' | 'error' | 'warn' | 'debug' | 'verbose')[] = isProduction
+    ? ['log', 'error', 'warn']
+    : ['log', 'error', 'warn', 'debug', 'verbose'];
+
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     new FastifyAdapter({ logger: false, trustProxy: true }),
+    {
+      logger: logLevels, // ✅ FIX #86: Применяем фильтрацию логов
+    },
   );
 
   const logger = new Logger('OrdersService');

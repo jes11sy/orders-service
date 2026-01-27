@@ -1,6 +1,9 @@
 -- Миграция для преобразования полей документов из String в String[]
 -- Это позволит хранить несколько файлов для каждого типа документа
 
+-- ✅ FIX #143: Обёртка в транзакцию для атомарности
+BEGIN;
+
 -- Шаг 1: Создаем временные колонки для массивов
 ALTER TABLE "orders" ADD COLUMN IF NOT EXISTS "bso_doc_temp" TEXT[];
 ALTER TABLE "orders" ADD COLUMN IF NOT EXISTS "expenditure_doc_temp" TEXT[];
@@ -69,4 +72,7 @@ CREATE INDEX IF NOT EXISTS "orders_expenditure_doc_gin_idx" ON "orders" USING GI
 -- Комментарии для документации
 COMMENT ON COLUMN "orders"."bso_doc" IS 'Массив путей к файлам БСО документов (до 10 файлов)';
 COMMENT ON COLUMN "orders"."expenditure_doc" IS 'Массив путей к файлам документов расходов (до 10 файлов)';
+
+-- ✅ FIX #143: Завершение транзакции
+COMMIT;
 

@@ -15,6 +15,8 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
 
   // ✅ FIX: Интервал для keepalive пинга
   private keepAliveInterval: NodeJS.Timeout | null = null;
+  // ✅ FIX: Интервал для статистики (предотвращение memory leak)
+  private statsInterval: NodeJS.Timeout | null = null;
   private isReconnecting = false;
 
   constructor() {
@@ -115,7 +117,8 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     });
 
     // ✅ ОПТИМИЗАЦИЯ: Периодический вывод статистики (каждые 5 минут)
-    setInterval(() => {
+    // ✅ FIX: Присваиваем интервал переменной для очистки при destroy
+    this.statsInterval = setInterval(() => {
       if (this.queryStats.total > 0) {
         const avgDuration = (this.queryStats.totalDuration / this.queryStats.total).toFixed(2);
         const slowPercent = ((this.queryStats.slow / this.queryStats.total) * 100).toFixed(2);
@@ -145,10 +148,14 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
   }
 
   async onModuleDestroy() {
-    // Остановить keepalive
+    // ✅ FIX: Остановить все интервалы для предотвращения memory leak
     if (this.keepAliveInterval) {
       clearInterval(this.keepAliveInterval);
       this.keepAliveInterval = null;
+    }
+    if (this.statsInterval) {
+      clearInterval(this.statsInterval);
+      this.statsInterval = null;
     }
     await this.$disconnect();
     this.logger.log('✅ Database disconnected');

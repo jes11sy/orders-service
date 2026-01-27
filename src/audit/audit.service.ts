@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { maskPhone, maskName } from '../utils/masking.util';
 
 export interface AuditLogEntry {
   timestamp?: string;
@@ -51,6 +52,7 @@ export class AuditService {
 
   /**
    * Логирование создания заказа
+   * ✅ FIX: PII данные маскируются перед записью
    */
   async logOrderCreate(
     orderId: number,
@@ -72,8 +74,9 @@ export class AuditService {
       metadata: {
         orderId,
         city: orderData.city,
-        clientName: orderData.clientName,
-        phone: orderData.phone,
+        // ✅ FIX: Маскируем PII данные
+        clientName: maskName(orderData.clientName),
+        phone: maskPhone(orderData.phone),
       },
     });
   }

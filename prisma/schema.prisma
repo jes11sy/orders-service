@@ -7,20 +7,21 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ✅ FIX #166: Добавлены VarChar ограничения для защиты от unbounded input
 model Order {
   id             Int       @id @default(autoincrement())
-  rk             String
-  city           String
-  avitoName      String?   @map("avito_name")
-  phone          String
-  typeOrder      String    @map("type_order")
-  clientName     String    @map("client_name")
-  address        String
+  rk             String    @db.VarChar(50)
+  city           String    @db.VarChar(100)
+  avitoName      String?   @map("avito_name") @db.VarChar(255)
+  phone          String    @db.VarChar(20)
+  typeOrder      String    @map("type_order") @db.VarChar(100)
+  clientName     String    @map("client_name") @db.VarChar(255)
+  address        String    @db.Text // Адрес может быть длинным
   dateMeeting    DateTime  @map("date_meeting")
-  typeEquipment  String    @map("type_equipment")
-  problem        String
-  callRecord     String?   @map("call_record")
-  statusOrder    String    @map("status_order")
+  typeEquipment  String    @map("type_equipment") @db.VarChar(100)
+  problem        String    @db.Text // Описание проблемы может быть длинным
+  callRecord     String?   @map("call_record") @db.Text // Запись звонка
+  statusOrder    String    @map("status_order") @db.VarChar(50)
   masterId       Int?      @map("master_id")
   result         Decimal?  @db.Decimal(10, 2)
   expenditure    Decimal?  @db.Decimal(10, 2)
@@ -33,60 +34,60 @@ model Order {
   closingData    DateTime? @map("closing_data")
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
-  avitoChatId    String?   @map("avito_chatid")
-  callId         String?   @map("call_id")
+  avitoChatId    String?   @map("avito_chatid") @db.VarChar(100)
+  callId         String?   @map("call_id") @db.VarChar(100)
   prepayment     Decimal?  @db.Decimal(10, 2)
   dateClosmod    DateTime? @map("date_closmod")
-  comment        String?
+  comment        String?   @db.Text // Комментарий может быть длинным
   
-  cashSubmissionStatus String?   @map("cash_submission_status")
+  cashSubmissionStatus String?   @map("cash_submission_status") @db.VarChar(50)
   cashSubmissionDate   DateTime? @map("cash_submission_date")
   cashSubmissionAmount Decimal?  @map("cash_submission_amount") @db.Decimal(10, 2)
-  cashReceiptDoc       String?   @map("cash_receipt_doc")
+  cashReceiptDoc       String?   @map("cash_receipt_doc") @db.VarChar(500)
   
   partner              Boolean?  @default(false)
   partnerPercent       Decimal?  @map("partner_percent") @db.Decimal(5, 2)
 
-  operator CallcentreOperator @relation(fields: [operatorNameId], references: [id])
-  master   Master?             @relation(fields: [masterId], references: [id])
+  // ✅ FIX #146: Добавлены onDelete для предотвращения orphaned records
+  operator CallcentreOperator @relation(fields: [operatorNameId], references: [id], onDelete: Restrict)
+  master   Master?             @relation(fields: [masterId], references: [id], onDelete: SetNull)
 
-  // ✅ ИСПРАВЛЕНИЕ: Добавлены недостающие индексы для оптимизации запросов
+  // ✅ FIX #167: Оптимизированные индексы (удалены дубликаты)
   @@index([statusOrder, city])
   @@index([closingData])
   @@index([masterId, city, closingData])
   @@index([phone])
-  @@index([createDate, city])
+  @@index([createDate, city])           // ✅ Покрывает createDate-only запросы (leftmost prefix)
   @@index([operatorNameId])
-  @@index([createDate])
-  @@index([clientName]) // ✅ Для поиска по имени клиента
-  @@index([address]) // ✅ Для поиска по адресу
-  @@index([statusOrder, masterId]) // ✅ Частая комбинация фильтров
-  @@index([avitoChatId]) // ✅ Для поиска по чатам Avito
-  @@index([cashSubmissionStatus]) // ✅ Для фильтрации по статусу сдачи кассы
-  // ✅ FIX: Индексы для getFilterOptions DISTINCT запросов (исправляет timeout >10s)
-  @@index([city]) // Для WHERE city = ANY($1::text[])
-  @@index([city, rk]) // Для SELECT DISTINCT rk WHERE city
-  @@index([city, typeEquipment]) // Для SELECT DISTINCT type_equipment WHERE city
-  @@index([rk]) // Для DISTINCT rk без фильтра
-  @@index([typeEquipment]) // Для DISTINCT type_equipment без фильтра
+  // REMOVED: @@index([createDate]) — дубликат, покрыт [createDate, city]
+  @@index([clientName])
+  // REMOVED: @@index([address]) — TEXT поля неэффективны для B-tree, используйте FTS
+  @@index([statusOrder, masterId])
+  @@index([avitoChatId])
+  @@index([cashSubmissionStatus])
+  @@index([city])                       // Для WHERE city = ANY($1::text[])
+  @@index([city, rk])
+  @@index([city, typeEquipment])
+  @@index([rk])
+  @@index([typeEquipment])
   @@map("orders")
 }
 
 model CallcentreOperator {
   id         Int      @id @default(autoincrement())
-  name       String
-  login      String   @unique
-  password   String
-  city       String
-  status     String
-  statusWork String   @map("status_work")
-  passport   String?
-  contract   String?
+  name       String   @db.VarChar(255)
+  login      String   @unique @db.VarChar(255)
+  password   String   @db.VarChar(255)
+  city       String   @db.VarChar(100)
+  status     String   @db.VarChar(50)
+  statusWork String   @map("status_work") @db.VarChar(50)
+  passport   String?  @db.VarChar(500)
+  contract   String?  @db.VarChar(500)
   dateCreate DateTime @map("date_create")
-  note       String?
+  note       String?  @db.Text
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
-  sipAddress String?  @map("sip_address")
+  sipAddress String?  @map("sip_address") @db.VarChar(255)
   
   orders Order[]
 
@@ -96,16 +97,16 @@ model CallcentreOperator {
 model Master {
   id          Int      @id @default(autoincrement())
   cities      String[]
-  name        String
-  login       String?  @unique
-  password    String?
-  passportDoc String?  @map("passport_doc")
-  contractDoc String?  @map("contract_doc")
-  statusWork  String   @map("status_work")
+  name        String   @db.VarChar(255)
+  login       String?  @unique @db.VarChar(255)
+  password    String?  @db.VarChar(255)
+  passportDoc String?  @map("passport_doc") @db.VarChar(500)
+  contractDoc String?  @map("contract_doc") @db.VarChar(500)
+  statusWork  String   @map("status_work") @db.VarChar(50)
   dateCreate  DateTime @default(now()) @map("date_create")
-  note        String?
-  tgId        String?  @map("tg_id")
-  chatId      String?  @map("chat_id")
+  note        String?  @db.Text
+  tgId        String?  @map("tg_id") @db.VarChar(50)
+  chatId      String?  @map("chat_id") @db.VarChar(50)
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
   
@@ -117,14 +118,14 @@ model Master {
 model Director {
   id          Int      @id @default(autoincrement())
   cities      String[]
-  name        String
-  login       String   @unique
-  password    String
-  contractDoc String?  @map("contract_doc")
-  passportDoc String?  @map("passport_doc")
+  name        String   @db.VarChar(255)
+  login       String   @unique @db.VarChar(255)
+  password    String   @db.VarChar(255)
+  contractDoc String?  @map("contract_doc") @db.VarChar(500)
+  passportDoc String?  @map("passport_doc") @db.VarChar(500)
   dateCreate  DateTime @default(now()) @map("date_create")
-  note        String?
-  tgId        String?  @map("tg_id")
+  note        String?  @db.Text
+  tgId        String?  @map("tg_id") @db.VarChar(50)
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
@@ -133,18 +134,18 @@ model Director {
 
 model Call {
   id           Int      @id @default(autoincrement())
-  rk           String
-  city         String
-  avitoName    String?  @map("avito_name")
-  phoneClient  String   @map("phone_client")
-  phoneAts     String   @map("phone_ats")
+  rk           String   @db.VarChar(50)
+  city         String   @db.VarChar(100)
+  avitoName    String?  @map("avito_name") @db.VarChar(255)
+  phoneClient  String   @map("phone_client") @db.VarChar(20)
+  phoneAts     String   @map("phone_ats") @db.VarChar(20)
   dateCreate   DateTime @map("date_create")
   operatorId   Int      @map("operator_id")
-  status       String
-  callId       String?  @unique @map("call_id")
+  status       String   @db.VarChar(50)
+  callId       String?  @unique @map("call_id") @db.VarChar(100)
   duration     Int?
-  recordUrl    String?  @map("record_url")
-  recordingPath String? @map("recording_path")
+  recordUrl    String?  @map("record_url") @db.VarChar(500)
+  recordingPath String? @map("recording_path") @db.VarChar(500)
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 

@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Put, Patch, Body, Param, Query, UseGuards, Request, HttpCode, HttpStatus, Logger, BadRequestException, Ip } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { SkipThrottle, Throttle } from '@nestjs/throttler';
 import { CookieJwtAuthGuard } from '../auth/guards/cookie-jwt-auth.guard';
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -30,6 +31,7 @@ export class OrdersController {
   ) {}
 
   @Get('health')
+  @SkipThrottle() // ✅ Health checks не лимитируем
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Health check endpoint' })
   async health() {
@@ -47,6 +49,7 @@ export class OrdersController {
   }
 
   @Get('metrics')
+  @SkipThrottle() // ✅ Metrics не лимитируем
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Get database connection pool metrics' })
   async metrics() {
@@ -62,6 +65,35 @@ export class OrdersController {
     };
   }
 
+  // ✅ FIX: Статические роуты ПЕРЕД динамическими (:id)
+  @Get('statuses')
+  @UseGuards(CookieJwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get available order statuses' })
+  async getOrderStatuses() {
+    return {
+      success: true,
+      data: [
+        'Ожидает',
+        'Принял', 
+        'В пути',
+        'В работе',
+        'Готово',
+        'Отказ',
+        'Модерн',
+        'Незаказ'
+      ]
+    };
+  }
+
+  @Get('filter-options')
+  @UseGuards(CookieJwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get filter options (RKs, typeEquipments)' })
+  async getFilterOptions(@Request() req: AuthenticatedRequest) {
+    return this.ordersService.getFilterOptions(req.user);
+  }
+
   @Get()
   @UseGuards(CookieJwtAuthGuard, RolesGuard)
   @ApiBearerAuth()
@@ -71,9 +103,10 @@ export class OrdersController {
   }
 
   @Post()
+  @Throttle({ short: { limit: 5, ttl: 1000 } }) // ✅ Строже: 5 заказов/сек
   @UseGuards(CookieJwtAuthGuard, RolesGuard)
   @ApiBearerAuth()
-  @Roles(UserRole.operator)
+  @Roles(UserRole.OPERATOR)
   @ApiOperation({ summary: 'Create new order' })
   async createOrder(@Body() dto: CreateOrderDto, @Request() req: AuthenticatedRequest, @Ip() ip: string) {
     // ✅ ИСПРАВЛЕНИЕ: Удалено логирование конфиденциальных данных
@@ -104,7 +137,7 @@ export class OrdersController {
   @Post('from-call')
   @UseGuards(CookieJwtAuthGuard, RolesGuard)
   @ApiBearerAuth()
-  @Roles(UserRole.operator)
+  @Roles(UserRole.OPERATOR)
   @ApiOperation({ summary: 'Create order from call' })
   async createOrderFromCall(@Body() dto: CreateOrderFromCallDto, @Request() req: AuthenticatedRequest, @Ip() ip: string) {
     const result = await this.ordersService.createOrderFromCall(dto, req.user);
@@ -127,7 +160,7 @@ export class OrdersController {
   @Post('from-chat')
   @UseGuards(CookieJwtAuthGuard, RolesGuard)
   @ApiBearerAuth()
-  @Roles(UserRole.operator)
+  @Roles(UserRole.OPERATOR)
   @ApiOperation({ summary: 'Create order from chat' })
   async createOrderFromChat(@Body() dto: CreateOrderFromChatDto, @Request() req: AuthenticatedRequest, @Ip() ip: string) {
     // ✅ ИСПРАВЛЕНИЕ: Удалено логирование конфиденциальных данных
@@ -166,13 +199,14 @@ export class OrdersController {
   @Put(':id')
   @UseGuards(CookieJwtAuthGuard, RolesGuard)
   @ApiBearerAuth()
-  @Roles(UserRole.operator, UserRole.director, UserRole.master)
+  @Roles(UserRole.OPERATOR, UserRole.DIRECTOR, UserRole.MASTER)
   @ApiOperation({ summary: 'Update order (operator, director, master)' })
   async updateOrder(@Param('id') id: string, @Body() dto: UpdateOrderDto, @Request() req: AuthenticatedRequest, @Ip() ip: string) {
-    // Получаем старый заказ ДО обновления
-    const oldOrder = await this.prismaService.order.findUnique({ where: { id: +id } });
-    
+    // ✅ FIX N+1: Используем oldOrder из результата updateOrder (уже возвращается из транзакции)
     const result = await this.ordersService.updateOrder(+id, dto, req.user, req.headers);
+    
+    // oldOrder возвращается вместе с результатом - НЕ делаем отдельный запрос!
+    const oldOrder = result.oldOrder;
     
     // Логируем обновление или закрытие заказа
     const userAgent = req.headers['user-agent'] || 'Unknown';
@@ -236,17 +270,14 @@ export class OrdersController {
   @Patch(':id/status')
   @UseGuards(CookieJwtAuthGuard, RolesGuard)
   @ApiBearerAuth()
-  @Roles(UserRole.operator, UserRole.director, UserRole.master)
+  @Roles(UserRole.OPERATOR, UserRole.DIRECTOR, UserRole.MASTER)
   @ApiOperation({ summary: 'Update order status' })
   async updateStatus(@Param('id') id: string, @Body('status') status: string, @Request() req: AuthenticatedRequest, @Ip() ip: string) {
-    // Сначала получаем старый статус
-    const order = await this.prismaService.order.findUnique({ where: { id: +id } });
-    const oldStatus = order?.statusOrder;
-    
+    // ✅ FIX #35: Убран лишний запрос к БД - oldStatus возвращается из updateStatus
     const result = await this.ordersService.updateStatus(+id, status, req.user, req.headers);
     
     // Логируем изменение статуса
-    if (oldStatus) {
+    if (result.oldStatus) {
       const userAgent = req.headers['user-agent'] || 'Unknown';
       await this.auditService.logOrderStatusChange(
         +id,
@@ -255,7 +286,7 @@ export class OrdersController {
         req.user.login,
         ip,
         userAgent as string,
-        oldStatus,
+        result.oldStatus,
         status
       );
     }
@@ -266,38 +297,10 @@ export class OrdersController {
   @Patch(':id/master')
   @UseGuards(CookieJwtAuthGuard, RolesGuard)
   @ApiBearerAuth()
-  @Roles(UserRole.operator, UserRole.director)
+  @Roles(UserRole.OPERATOR, UserRole.DIRECTOR)
   @ApiOperation({ summary: 'Assign master to order' })
   async assignMaster(@Param('id') id: string, @Body('masterId') masterId: number) {
     return this.ordersService.assignMaster(+id, masterId);
-  }
-
-  @Get('statuses')
-  @UseGuards(CookieJwtAuthGuard, RolesGuard)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Get available order statuses' })
-  async getOrderStatuses() {
-    return {
-      success: true,
-      data: [
-        'Ожидает',
-        'Принял', 
-        'В пути',
-        'В работе',
-        'Готово',
-        'Отказ',
-        'Модерн',
-        'Незаказ'
-      ]
-    };
-  }
-
-  @Get('filter-options')
-  @UseGuards(CookieJwtAuthGuard, RolesGuard)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Get filter options (RKs, typeEquipments)' })
-  async getFilterOptions(@Request() req: AuthenticatedRequest) {
-    return this.ordersService.getFilterOptions(req.user);
   }
 
   @Get(':id/avito-chat')
@@ -311,7 +314,7 @@ export class OrdersController {
   @Patch(':id/submit-cash')
   @UseGuards(CookieJwtAuthGuard, RolesGuard)
   @ApiBearerAuth()
-  @Roles(UserRole.master)
+  @Roles(UserRole.MASTER)
   @ApiOperation({ summary: 'Submit cash for review' })
   async submitCashForReview(
     @Param('id') id: string,
