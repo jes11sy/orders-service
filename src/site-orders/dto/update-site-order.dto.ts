@@ -23,7 +23,7 @@ export class UpdateSiteOrderDto {
 
   @IsOptional()
   @IsString()
-  @IsIn(['Новый', 'Не отвечает', 'Отказ', 'Заказ создан'])
+  @IsIn(['Создан', 'Не отвечает', 'Отказ'])
   status?: string;
 
   @IsOptional()
