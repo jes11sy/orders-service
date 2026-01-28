@@ -10,12 +10,12 @@ export class QueryOrdersDto {
   @Min(1)
   page?: number = 1;
 
-  @ApiPropertyOptional({ description: 'Количество записей на странице', minimum: 1, maximum: 100, default: 50 })
+  @ApiPropertyOptional({ description: 'Количество записей на странице', minimum: 1, maximum: 300, default: 50 })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(100)
+  @Max(300)
   limit?: number = 50;
 
   @ApiPropertyOptional({ description: 'Статус заказа' })
