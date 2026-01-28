@@ -1404,10 +1404,19 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
         statusOrder: true,
         dateMeeting: true,
         typeEquipment: true,
+        typeOrder: true,
         problem: true,
         createdAt: true,
         rk: true,
+        avitoName: true,
         address: true,
+        result: true,
+        master: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
       },
       orderBy: {
         createdAt: 'desc',
@@ -1424,10 +1433,14 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
         status: order.statusOrder,
         dateMeeting: order.dateMeeting,
         typeEquipment: order.typeEquipment,
+        typeOrder: order.typeOrder,
         problem: order.problem,
         createdAt: order.createdAt,
         rk: order.rk,
+        avitoName: order.avitoName,
         address: order.address,
+        result: order.result,
+        master: order.master,
       })),
     };
   }
