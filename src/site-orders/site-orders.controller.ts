@@ -13,8 +13,7 @@ import {
 import { SiteOrdersService } from './site-orders.service';
 import { CreateSiteOrderDto, UpdateSiteOrderDto, QuerySiteOrdersDto } from './dto';
 import { CookieJwtAuthGuard } from '../auth/guards/cookie-jwt-auth.guard';
-import { RolesGuard } from '../auth/roles.guard';
-import { Roles } from '../auth/roles.guard';
+import { RolesGuard, Roles, UserRole } from '../auth/roles.guard';
 
 @Controller('site-orders')
 @UseGuards(CookieJwtAuthGuard, RolesGuard)
@@ -22,25 +21,25 @@ export class SiteOrdersController {
   constructor(private readonly siteOrdersService: SiteOrdersService) {}
 
   @Post()
-  @Roles('operator', 'admin')
+  @Roles(UserRole.OPERATOR, UserRole.ADMIN)
   create(@Body() createSiteOrderDto: CreateSiteOrderDto) {
     return this.siteOrdersService.create(createSiteOrderDto);
   }
 
   @Get()
-  @Roles('operator', 'admin')
+  @Roles(UserRole.OPERATOR, UserRole.ADMIN)
   findAll(@Query() query: QuerySiteOrdersDto) {
     return this.siteOrdersService.findAll(query);
   }
 
   @Get(':id')
-  @Roles('operator', 'admin')
+  @Roles(UserRole.OPERATOR, UserRole.ADMIN)
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.siteOrdersService.findOne(id);
   }
 
   @Patch(':id')
-  @Roles('operator', 'admin')
+  @Roles(UserRole.OPERATOR, UserRole.ADMIN)
   update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateSiteOrderDto: UpdateSiteOrderDto,
@@ -49,7 +48,7 @@ export class SiteOrdersController {
   }
 
   @Patch(':id/status')
-  @Roles('operator', 'admin')
+  @Roles(UserRole.OPERATOR, UserRole.ADMIN)
   updateStatus(
     @Param('id', ParseIntPipe) id: number,
     @Body('status') status: string,
@@ -58,7 +57,7 @@ export class SiteOrdersController {
   }
 
   @Patch(':id/link-order')
-  @Roles('operator', 'admin')
+  @Roles(UserRole.OPERATOR, UserRole.ADMIN)
   linkToOrder(
     @Param('id', ParseIntPipe) id: number,
     @Body('orderId', ParseIntPipe) orderId: number,
@@ -67,7 +66,7 @@ export class SiteOrdersController {
   }
 
   @Delete(':id')
-  @Roles('admin')
+  @Roles(UserRole.ADMIN)
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.siteOrdersService.remove(id);
   }
