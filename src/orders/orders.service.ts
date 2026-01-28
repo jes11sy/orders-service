@@ -1383,6 +1383,55 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Получить заказы по номеру телефона клиента
+   */
+  async getOrdersByPhone(phone: string, user: AuthUser) {
+    // Нормализуем номер телефона (убираем +, пробелы, скобки)
+    const normalizedPhone = phone.replace(/[\s\+\(\)\-]/g, '');
+    
+    const orders = await this.prisma.order.findMany({
+      where: {
+        OR: [
+          { phone: { contains: normalizedPhone } },
+          { phone: { contains: phone } },
+        ],
+      },
+      select: {
+        id: true,
+        clientName: true,
+        city: true,
+        statusOrder: true,
+        dateMeeting: true,
+        typeEquipment: true,
+        problem: true,
+        createdAt: true,
+        rk: true,
+        address: true,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 20, // Последние 20 заказов
+    });
+
+    return {
+      success: true,
+      data: orders.map(order => ({
+        id: order.id,
+        clientName: order.clientName,
+        city: order.city,
+        status: order.statusOrder,
+        dateMeeting: order.dateMeeting,
+        typeEquipment: order.typeEquipment,
+        problem: order.problem,
+        createdAt: order.createdAt,
+        rk: order.rk,
+        address: order.address,
+      })),
+    };
+  }
+
 }
 
 

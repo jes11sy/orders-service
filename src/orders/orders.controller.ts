@@ -94,6 +94,15 @@ export class OrdersController {
     return this.ordersService.getFilterOptions(req.user);
   }
 
+  @Get('by-phone/:phone')
+  @UseGuards(CookieJwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
+  @Roles(UserRole.ADMIN, UserRole.OPERATOR, UserRole.DIRECTOR)
+  @ApiOperation({ summary: 'Get orders by phone number' })
+  async getOrdersByPhone(@Param('phone') phone: string, @Request() req: AuthenticatedRequest) {
+    return this.ordersService.getOrdersByPhone(phone, req.user);
+  }
+
   @Get()
   @UseGuards(CookieJwtAuthGuard, RolesGuard)
   @ApiBearerAuth()
