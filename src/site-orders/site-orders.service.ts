@@ -8,10 +8,8 @@ export class SiteOrdersService {
 
   async create(createSiteOrderDto: CreateSiteOrderDto) {
     return this.prisma.siteOrder.create({
-      data: {
-        ...createSiteOrderDto,
-        status: 'Создан',
-      },
+      data: createSiteOrderDto,
+      // status по умолчанию "Новый" (из базы)
     });
   }
 

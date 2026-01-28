@@ -204,7 +204,7 @@ model SiteOrder {
   site            String   @db.VarChar(255)
   clientName      String   @map("client_name") @db.VarChar(255)
   phone           String   @db.VarChar(20)
-  status          String   @db.VarChar(50) @default("Создан")
+  status          String   @db.VarChar(50) @default("Новый")
   comment         String?  @db.Text
   commentOperator String?  @map("comment_operator") @db.Text
   createdAt       DateTime @default(now()) @map("created_at")
