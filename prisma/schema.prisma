@@ -199,16 +199,17 @@ model ErrorLog {
 
 // Заявки с сайта
 model SiteOrder {
-  id          Int      @id @default(autoincrement())
-  city        String   @db.VarChar(100)
-  site        String   @db.VarChar(255)
-  clientName  String   @map("client_name") @db.VarChar(255)
-  phone       String   @db.VarChar(20)
-  status      String   @db.VarChar(50) @default("Создан")
-  comment     String?  @db.Text
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
-  orderId     Int?     @map("order_id")
+  id              Int      @id @default(autoincrement())
+  city            String   @db.VarChar(100)
+  site            String   @db.VarChar(255)
+  clientName      String   @map("client_name") @db.VarChar(255)
+  phone           String   @db.VarChar(20)
+  status          String   @db.VarChar(50) @default("Создан")
+  comment         String?  @db.Text
+  commentOperator String?  @map("comment_operator") @db.Text
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  orderId         Int?     @map("order_id")
 
   @@index([status])
   @@index([city])

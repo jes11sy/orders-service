@@ -31,6 +31,10 @@ export class UpdateSiteOrderDto {
   comment?: string;
 
   @IsOptional()
+  @IsString()
+  commentOperator?: string;
+
+  @IsOptional()
   @IsInt()
   orderId?: number;
 }
