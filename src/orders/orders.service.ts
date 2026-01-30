@@ -1040,33 +1040,8 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
         paymentPurpose: `Заказ №${order.id}`,
       };
       
-      // ✅ ЗАЩИТА: Проверяем тип bsoDoc перед обработкой
-      this.logger.debug(`[syncCashReceipt] Order #${order.id} bsoDoc type: ${typeof order.bsoDoc}, isArray: ${Array.isArray(order.bsoDoc)}, value: ${JSON.stringify(order.bsoDoc)}`);
-      
-      // Добавляем receiptDoc только если он есть
-      // Извлекаем путь из URL (убираем домен и query параметры)
-      // bsoDoc теперь массив, берем первый элемент если есть
-      if (order.bsoDoc && Array.isArray(order.bsoDoc) && order.bsoDoc.length > 0) {
-        try {
-          const firstDoc = order.bsoDoc[0];
-          
-          // ✅ ЗАЩИТА: Проверяем что firstDoc это строка
-          if (typeof firstDoc !== 'string') {
-            this.logger.warn(`[syncCashReceipt] Order #${order.id} bsoDoc[0] is not a string: ${typeof firstDoc}`);
-          } else {
-            this.logger.debug(`[syncCashReceipt] Processing firstDoc: ${firstDoc}`);
-            
-            const url = new URL(firstDoc);
-            // Получаем путь без начального слеша (например: director/orders/bso_doc/file.jpg)
-            const path = url.pathname.startsWith('/') ? url.pathname.substring(1) : url.pathname;
-            cashData.receiptDoc = path;
-          }
-        } catch (e) {
-          // Если не URL, а просто путь - используем как есть
-          this.logger.debug(`[syncCashReceipt] Not a URL, using as path: ${order.bsoDoc[0]}`);
-          cashData.receiptDoc = order.bsoDoc[0];
-        }
-      }
+      // БСО хранится в заказе (order.bsoDoc), не дублируем в кассу
+      // receiptDoc в кассе используется только для ручных расходов
 
       // Получаем JWT токен из заголовков запроса
       const authHeader = requestHeaders?.authorization || requestHeaders?.Authorization;
