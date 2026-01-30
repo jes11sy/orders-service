@@ -56,6 +56,11 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
         { level: 'error', emit: 'stdout' },
         { level: 'query', emit: 'event' }, // ✅ Включаем логирование запросов для мониторинга
       ],
+      // Таймаут транзакций по умолчанию (можно переопределить в $transaction)
+      transactionOptions: {
+        maxWait: 10000,   // Максимальное ожидание начала транзакции: 10s
+        timeout: 30000,   // Таймаут выполнения транзакции: 30s
+      },
     });
 
     if (needsParams) {

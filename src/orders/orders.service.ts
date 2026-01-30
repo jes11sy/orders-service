@@ -660,20 +660,25 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
 
       this.logger.log(`Order #${updated.id} updated successfully`);
 
-      // ✅ FIX: Cash-service вызов внутри транзакции
-      // Если упадёт — вся транзакция откатится автоматически
-      if (dto.statusOrder === 'Готово' && updated.masterChange && Number(updated.masterChange) > 0) {
-        this.logger.log(`Order #${updated.id} completed, syncing cash receipt (masterChange=${updated.masterChange})`);
-        await this.syncCashReceipt(updated, user, headers);
-      }
+      // ✅ FIX: Проверяем нужен ли sync ПОСЛЕ транзакции (не внутри!)
+      const needsCashSync = dto.statusOrder === 'Готово' && updated.masterChange && Number(updated.masterChange) > 0;
 
-      return { order, updated, cityChanged, oldMasterIdBeforeCityChange };
+      return { order, updated, cityChanged, oldMasterIdBeforeCityChange, needsCashSync };
     }, {
-      timeout: 30000, // 30 секунд на всю транзакцию
+      timeout: 15000, // 15 секунд на БД-операции (без HTTP-вызовов)
       isolationLevel: 'ReadCommitted', // Стандартный уровень изоляции
     });
 
-    const { order, updated, cityChanged, oldMasterIdBeforeCityChange } = result;
+    const { order, updated, cityChanged, oldMasterIdBeforeCityChange, needsCashSync } = result;
+
+    // ✅ FIX: Cash-service вызов ПОСЛЕ транзакции (не блокирует БД)
+    if (needsCashSync) {
+      this.logger.log(`Order #${updated.id} completed, syncing cash receipt (masterChange=${updated.masterChange})`);
+      // Асинхронно, не ждём результата — ошибка не должна блокировать ответ клиенту
+      this.syncCashReceipt(updated, user, headers).catch(err => {
+        this.logger.error(`Failed to sync cash for order #${updated.id}: ${err.message}`);
+      });
+    }
     
     // ✅ FIX: Уведомления отправляются ПОСЛЕ успешного коммита транзакции
     this.sendUpdateNotifications(order, updated, dto, { cityChanged, oldMasterIdBeforeCityChange });

@@ -62,6 +62,7 @@ async function bootstrap() {
         frameSrc: ["'none'"],
       },
     },
+    frameguard: { action: 'deny' }, // X-Frame-Options: DENY
   });
   logger.log('Security headers (CSP) enabled');
 
