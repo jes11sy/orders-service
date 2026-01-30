@@ -562,9 +562,27 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
       // Создаем объект обновления
       const updateData: any = {};
       
+      // Флаг для отслеживания смены города (для обнуления masterId)
+      let cityChanged = false;
+      let oldMasterIdBeforeCityChange: number | null = null;
+      
       // Основные поля заказа
       if (dto.rk !== undefined && dto.rk !== null) updateData.rk = dto.rk;
-      if (dto.city !== undefined && dto.city !== null) updateData.city = dto.city;
+      
+      // Обработка изменения города
+      if (dto.city !== undefined && dto.city !== null && dto.city !== order.city) {
+        updateData.city = dto.city;
+        cityChanged = true;
+        
+        // Если был назначен мастер - снимаем его
+        if (order.masterId) {
+          oldMasterIdBeforeCityChange = order.masterId;
+          updateData.masterId = null;
+          this.logger.log(`City changed from ${order.city} to ${dto.city}, removing master #${order.masterId} from order #${id}`);
+        }
+      } else if (dto.city !== undefined && dto.city !== null) {
+        updateData.city = dto.city;
+      }
       if (dto.avitoName !== undefined && dto.avitoName !== null) updateData.avitoName = dto.avitoName;
       if (dto.phone !== undefined && dto.phone !== null) updateData.phone = dto.phone;
       if (dto.typeOrder !== undefined && dto.typeOrder !== null) updateData.typeOrder = dto.typeOrder;
@@ -649,16 +667,16 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
         await this.syncCashReceipt(updated, user, headers);
       }
 
-      return { order, updated };
+      return { order, updated, cityChanged, oldMasterIdBeforeCityChange };
     }, {
       timeout: 30000, // 30 секунд на всю транзакцию
       isolationLevel: 'ReadCommitted', // Стандартный уровень изоляции
     });
 
-    const { order, updated } = result;
+    const { order, updated, cityChanged, oldMasterIdBeforeCityChange } = result;
     
     // ✅ FIX: Уведомления отправляются ПОСЛЕ успешного коммита транзакции
-    this.sendUpdateNotifications(order, updated, dto);
+    this.sendUpdateNotifications(order, updated, dto, { cityChanged, oldMasterIdBeforeCityChange });
     
     // ✅ FIX N+1: Возвращаем oldOrder для контроллера (чтобы не делать дополнительный запрос)
     return { 
@@ -672,7 +690,49 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
   /**
    * ✅ FIX: Выделенный метод для отправки уведомлений (вызывается после транзакции)
    */
-  private sendUpdateNotifications(order: any, updated: any, dto: UpdateOrderDto) {
+  private sendUpdateNotifications(
+    order: any, 
+    updated: any, 
+    dto: UpdateOrderDto,
+    extra?: { cityChanged?: boolean; oldMasterIdBeforeCityChange?: number | null }
+  ) {
+    // 0. Изменение города
+    if (extra?.cityChanged && dto.city && order.city !== dto.city) {
+      this.fireAndForgetNotification(
+        this.notificationsService.sendCityChangeNotification({
+          orderId: updated.id,
+          oldCity: order.city,
+          newCity: updated.city,
+          clientName: updated.clientName?.trim() || undefined,
+          masterId: extra.oldMasterIdBeforeCityChange || undefined,
+          rk: updated.rk?.trim() || undefined,
+          avitoName: updated.avitoName?.trim() || undefined,
+          typeEquipment: updated.typeEquipment?.trim() || undefined,
+          dateMeeting: updated.dateMeeting?.toISOString(),
+        }),
+        `city-change-#${updated.id}`
+      );
+    }
+
+    // 0.1. Изменение адреса (только если город не менялся, иначе адрес уже учтён)
+    if (dto.address && order.address !== dto.address && !extra?.cityChanged) {
+      this.fireAndForgetNotification(
+        this.notificationsService.sendAddressChangeNotification({
+          orderId: updated.id,
+          city: updated.city,
+          oldAddress: order.address || 'Не указан',
+          newAddress: updated.address,
+          clientName: updated.clientName?.trim() || undefined,
+          masterId: updated.masterId || undefined,
+          rk: updated.rk?.trim() || undefined,
+          avitoName: updated.avitoName?.trim() || undefined,
+          typeEquipment: updated.typeEquipment?.trim() || undefined,
+          dateMeeting: updated.dateMeeting?.toISOString(),
+        }),
+        `address-change-#${updated.id}`
+      );
+    }
+
     // 1. Изменение даты встречи
     if (dto.dateMeeting && order.dateMeeting?.toISOString() !== new Date(dto.dateMeeting).toISOString()) {
       this.fireAndForgetNotification(

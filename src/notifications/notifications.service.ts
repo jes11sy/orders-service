@@ -91,6 +91,31 @@ interface OrderInModernNotification {
   comment?: string;
 }
 
+interface CityChangeNotification {
+  orderId: number;
+  oldCity: string;
+  newCity: string;
+  clientName?: string;
+  masterId?: number;
+  rk?: string;
+  avitoName?: string;
+  typeEquipment?: string;
+  dateMeeting?: string;
+}
+
+interface AddressChangeNotification {
+  orderId: number;
+  city: string;
+  oldAddress: string;
+  newAddress: string;
+  clientName?: string;
+  masterId?: number;
+  rk?: string;
+  avitoName?: string;
+  typeEquipment?: string;
+  dateMeeting?: string;
+}
+
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
@@ -289,6 +314,52 @@ export class NotificationsService {
       this.logger.log(`✅ Order in modern notification sent for order #${data.orderId}`);
     } catch (error) {
       this.logger.error(`❌ Failed to send order in modern notification: ${error.message}`);
+    }
+  }
+
+  /**
+   * Отправка уведомления об изменении города
+   */
+  async sendCityChangeNotification(data: CityChangeNotification): Promise<void> {
+    try {
+      await firstValueFrom(
+        this.httpService.post(
+          `${this.notificationsUrl}/notifications/city-change`,
+          data,
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Webhook-Token': this.webhookToken,
+            },
+          },
+        ),
+      );
+      this.logger.log(`✅ City change notification sent for order #${data.orderId}`);
+    } catch (error) {
+      this.logger.error(`❌ Failed to send city change notification: ${error.message}`);
+    }
+  }
+
+  /**
+   * Отправка уведомления об изменении адреса
+   */
+  async sendAddressChangeNotification(data: AddressChangeNotification): Promise<void> {
+    try {
+      await firstValueFrom(
+        this.httpService.post(
+          `${this.notificationsUrl}/notifications/address-change`,
+          data,
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Webhook-Token': this.webhookToken,
+            },
+          },
+        ),
+      );
+      this.logger.log(`✅ Address change notification sent for order #${data.orderId}`);
+    } catch (error) {
+      this.logger.error(`❌ Failed to send address change notification: ${error.message}`);
     }
   }
 }
