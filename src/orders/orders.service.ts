@@ -671,13 +671,24 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
 
     const { order, updated, cityChanged, oldMasterIdBeforeCityChange, needsCashSync } = result;
 
-    // ✅ FIX: Cash-service вызов ПОСЛЕ транзакции (не блокирует БД)
+    // ✅ FIX: Cash-service вызов ПОСЛЕ транзакции БД (не блокирует БД лок)
+    // НО синхронно — если касса недоступна, возвращаем ошибку клиенту
     if (needsCashSync) {
       this.logger.log(`Order #${updated.id} completed, syncing cash receipt (masterChange=${updated.masterChange})`);
-      // Асинхронно, не ждём результата — ошибка не должна блокировать ответ клиенту
-      this.syncCashReceipt(updated, user, headers).catch(err => {
+      try {
+        await this.syncCashReceipt(updated, user, headers);
+      } catch (err) {
         this.logger.error(`Failed to sync cash for order #${updated.id}: ${err.message}`);
-      });
+        // Откатываем статус заказа, так как касса не синхронизирована
+        await this.prisma.order.update({
+          where: { id: updated.id },
+          data: { 
+            statusOrder: order.statusOrder, // Возвращаем старый статус
+            closingData: order.closingData,  // Возвращаем старую дату закрытия
+          }
+        });
+        throw new Error(`Заказ не может быть закрыт: сервис кассы недоступен. Попробуйте позже.`);
+      }
     }
     
     // ✅ FIX: Уведомления отправляются ПОСЛЕ успешного коммита транзакции
@@ -901,8 +912,7 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
 
     const needsCashSync = status === 'Готово' && order.masterChange && Number(order.masterChange) > 0;
 
-    // ✅ FIX: Используем транзакцию для атомарного обновления статуса и синхронизации кассы
-    // Это предотвращает дублирование записей в кассу при повторных запросах
+    // ✅ FIX: Транзакция только для БД-операций (без HTTP-вызовов)
     const updated = await this.prisma.$transaction(async (tx) => {
       // Проверяем, не был ли статус уже изменен (защита от дублирования)
       const currentOrder = await tx.order.findUnique({
@@ -923,22 +933,31 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
         },
       });
 
-      // Синхронизация кассы внутри транзакции
-      if (needsCashSync) {
-        this.logger.log(`Order #${result.id} status -> Готово, syncing cash (masterChange=${result.masterChange})`);
-        try {
-          await this.syncCashReceipt(result, user, headers);
-        } catch (err) {
-          this.logger.error(`Failed to sync cash for order #${result.id}: ${err.message}`);
-          throw new Error(`Сервис транзакций недоступен.`);
-        }
-      }
-
       return result;
     }, {
       isolationLevel: 'Serializable', // Максимальная изоляция для предотвращения race conditions
-      timeout: 10000, // 10 секунд таймаут
+      timeout: 15000, // 15 секунд таймаут (только БД-операции)
     });
+
+    // ✅ FIX: Синхронизация кассы ПОСЛЕ транзакции БД (не держит лок)
+    // Но синхронно — если касса недоступна, откатываем статус
+    if (needsCashSync) {
+      this.logger.log(`Order #${updated.id} status -> Готово, syncing cash (masterChange=${updated.masterChange})`);
+      try {
+        await this.syncCashReceipt(updated, user, headers);
+      } catch (err) {
+        this.logger.error(`Failed to sync cash for order #${updated.id}: ${err.message}`);
+        // Откатываем статус заказа
+        await this.prisma.order.update({
+          where: { id },
+          data: { 
+            statusOrder: order.statusOrder,
+            closingData: order.closingData,
+          }
+        });
+        throw new Error(`Сервис транзакций недоступен. Попробуйте позже.`);
+      }
+    }
 
     // ✅ FIX #35: Возвращаем oldStatus для логирования без лишнего запроса в контроллере
     return { success: true, data: updated, oldStatus: order.statusOrder };
