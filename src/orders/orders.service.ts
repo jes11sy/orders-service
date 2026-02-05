@@ -382,7 +382,7 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
         operatorId: true,
         callId: true,
       },
-      orderBy: { dateCreate: 'desc' },
+      orderBy: { createdAt: 'desc' },
     });
 
     if (!calls || calls.length === 0) {

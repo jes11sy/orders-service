@@ -139,7 +139,6 @@ model Call {
   avitoName    String?  @map("avito_name") @db.VarChar(255)
   phoneClient  String   @map("phone_client") @db.VarChar(20)
   phoneAts     String   @map("phone_ats") @db.VarChar(20)
-  dateCreate   DateTime @map("date_create")
   operatorId   Int      @map("operator_id")
   status       String   @db.VarChar(50)
   callId       String?  @unique @map("call_id") @db.VarChar(100)
@@ -151,7 +150,7 @@ model Call {
 
   @@map("calls")
   @@index([city])
-  @@index([dateCreate])
+  @@index([createdAt])
   @@index([operatorId])
   @@index([phoneClient])
   @@index([callId])
