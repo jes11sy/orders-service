@@ -72,7 +72,7 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
   // ✅ ОПТИМИЗАЦИЯ: SQL сортировка с CASE WHEN вместо загрузки всех заказов в память
   async getOrders(query: QueryOrdersDto, user: AuthUser) {
     const startTime = Date.now();
-    const { page = 1, limit = 50, status, city, search, masterId, master, closingDate, rk, typeEquipment, dateType, dateFrom, dateTo } = query;
+    const { page = 1, limit = 50, status, city, search, searchId, searchPhone, searchAddress, masterId, master, closingDate, rk, typeEquipment, dateType, dateFrom, dateTo } = query;
     const skip = (page - 1) * limit;
     
     this.logger.debug(`[getOrders] START: user=${user.userId} (${user.role}), page=${page}, limit=${limit}, filters=${JSON.stringify({ status, city, search: search ? '***' : null, masterId, master, rk, typeEquipment })}`);
@@ -191,6 +191,30 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
         params.push(`%${search}%`);
         paramIndex++;
       }
+    }
+
+    // Поиск по ID заказа (отдельное поле)
+    if (searchId) {
+      const idAsNumber = parseInt(searchId, 10);
+      if (!isNaN(idAsNumber) && idAsNumber > 0) {
+        whereConditions.push(`o.id = $${paramIndex}`);
+        params.push(idAsNumber);
+        paramIndex++;
+      }
+    }
+
+    // Поиск по номеру телефона (отдельное поле)
+    if (searchPhone) {
+      whereConditions.push(`o.phone ILIKE $${paramIndex}`);
+      params.push(`%${searchPhone}%`);
+      paramIndex++;
+    }
+
+    // Поиск по адресу (отдельное поле)
+    if (searchAddress) {
+      whereConditions.push(`o.address ILIKE $${paramIndex}`);
+      params.push(`%${searchAddress}%`);
+      paramIndex++;
     }
 
     const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
