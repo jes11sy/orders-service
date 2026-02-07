@@ -197,6 +197,14 @@ export class OrdersController {
     }
   }
 
+  @Get(':id/history')
+  @UseGuards(CookieJwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get order history (audit logs)' })
+  async getOrderHistory(@Param('id') id: string, @Request() req: AuthenticatedRequest) {
+    return this.ordersService.getOrderHistory(+id, req.user);
+  }
+
   @Get(':id')
   @UseGuards(CookieJwtAuthGuard, RolesGuard)
   @ApiBearerAuth()

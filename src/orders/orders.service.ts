@@ -1443,6 +1443,63 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Получить историю изменений заказа из audit_logs
+   */
+  async getOrderHistory(orderId: number, user: AuthUser) {
+    // Проверяем существование заказа
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: { id: true, city: true, masterId: true },
+    });
+
+    if (!order) {
+      throw new NotFoundException('Заказ не найден');
+    }
+
+    // RBAC: проверяем доступ
+    if (user.role === UserRole.MASTER && order.masterId !== user.userId) {
+      throw new ForbiddenException('У вас нет доступа к этому заказу');
+    }
+
+    if (user.role === UserRole.DIRECTOR && user.cities && !user.cities.includes(order.city)) {
+      throw new ForbiddenException('Заказ не в вашем городе');
+    }
+
+    // Получаем историю из audit_logs
+    const logs = await this.prisma.auditLog.findMany({
+      where: {
+        eventType: {
+          in: ['order.create', 'order.update', 'order.close', 'order.status.change'],
+        },
+        metadata: {
+          path: ['orderId'],
+          equals: orderId,
+        },
+      },
+      orderBy: {
+        timestamp: 'desc',
+      },
+      take: 100, // Последние 100 записей
+    });
+
+    // Преобразуем для фронтенда
+    const history = logs.map(log => ({
+      id: log.id,
+      timestamp: log.timestamp,
+      eventType: log.eventType,
+      userId: log.userId,
+      role: log.role,
+      login: log.login,
+      metadata: log.metadata,
+    }));
+
+    return {
+      success: true,
+      data: history,
+    };
+  }
+
+  /**
    * Получить заказы по номеру телефона клиента
    */
   async getOrdersByPhone(phone: string, user: AuthUser) {
