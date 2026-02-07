@@ -370,6 +370,7 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
     });
 
     // ✅ ОПТИМИЗАЦИЯ: Fire-and-forget уведомление (не блокирует ответ)
+    // Telegram уведомление директорам
     this.fireAndForgetNotification(
       this.notificationsService.sendNewOrderNotification({
         orderId: order.id,
@@ -385,6 +386,30 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
       }),
       `new-order-#${order.id}`
     );
+
+    // ✅ UI уведомление директорам города
+    this.fireAndForgetNotification(
+      this.notificationsService.sendUINotificationToDirectors(
+        order.city,
+        'order_new',
+        order.id,
+        order.clientName,
+      ),
+      `ui-new-order-#${order.id}`
+    );
+
+    // ✅ UI уведомление оператору (создателю)
+    if (order.operatorNameId) {
+      this.fireAndForgetNotification(
+        this.notificationsService.sendUINotificationToOperator(
+          order.operatorNameId,
+          'order_created',
+          order.id,
+          order.clientName,
+        ),
+        `ui-operator-order-#${order.id}`
+      );
+    }
 
     // ✅ FIX: Инвалидация кэша filter options при создании заказа
     this.invalidateFilterOptionsCache();
@@ -445,6 +470,7 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
     });
 
     // ✅ ОПТИМИЗАЦИЯ: Fire-and-forget уведомление (не блокирует ответ)
+    // Telegram уведомление директорам
     this.fireAndForgetNotification(
       this.notificationsService.sendNewOrderNotification({
         orderId: order.id,
@@ -460,6 +486,30 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
       }),
       `new-order-from-call-#${order.id}`
     );
+
+    // ✅ UI уведомление директорам города
+    this.fireAndForgetNotification(
+      this.notificationsService.sendUINotificationToDirectors(
+        order.city,
+        'order_new',
+        order.id,
+        order.clientName,
+      ),
+      `ui-new-order-from-call-#${order.id}`
+    );
+
+    // ✅ UI уведомление оператору
+    if (order.operatorNameId) {
+      this.fireAndForgetNotification(
+        this.notificationsService.sendUINotificationToOperator(
+          order.operatorNameId,
+          'order_created',
+          order.id,
+          order.clientName,
+        ),
+        `ui-operator-order-from-call-#${order.id}`
+      );
+    }
 
     // ✅ FIX: Инвалидация кэша filter options при создании заказа
     this.invalidateFilterOptionsCache();
@@ -498,6 +548,7 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
     });
 
     // ✅ ОПТИМИЗАЦИЯ: Fire-and-forget уведомление (не блокирует ответ)
+    // Telegram уведомление директорам
     this.fireAndForgetNotification(
       this.notificationsService.sendNewOrderNotification({
         orderId: order.id,
@@ -513,6 +564,30 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
       }),
       `new-order-from-chat-#${order.id}`
     );
+
+    // ✅ UI уведомление директорам города
+    this.fireAndForgetNotification(
+      this.notificationsService.sendUINotificationToDirectors(
+        order.city,
+        'order_new',
+        order.id,
+        order.clientName,
+      ),
+      `ui-new-order-from-chat-#${order.id}`
+    );
+
+    // ✅ UI уведомление оператору
+    if (order.operatorNameId) {
+      this.fireAndForgetNotification(
+        this.notificationsService.sendUINotificationToOperator(
+          order.operatorNameId,
+          'order_created',
+          order.id,
+          order.clientName,
+        ),
+        `ui-operator-order-from-chat-#${order.id}`
+      );
+    }
 
     // ✅ FIX: Инвалидация кэша filter options при создании заказа
     this.invalidateFilterOptionsCache();
@@ -805,6 +880,18 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
         }),
         `order-accepted-#${updated.id}`
       );
+      
+      // ✅ UI уведомление директорам
+      this.fireAndForgetNotification(
+        this.notificationsService.sendUINotificationToDirectors(
+          updated.city,
+          'order_accepted',
+          updated.id,
+          updated.clientName,
+          updated.master?.name,
+        ),
+        `ui-order-accepted-#${updated.id}`
+      );
     }
 
     // 3. Закрытие заказа
@@ -821,6 +908,18 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
           handover: updated.masterChange?.toString(),
         }),
         `order-closed-#${updated.id}`
+      );
+      
+      // ✅ UI уведомление директорам
+      this.fireAndForgetNotification(
+        this.notificationsService.sendUINotificationToDirectors(
+          updated.city,
+          'order_closed',
+          updated.id,
+          updated.clientName,
+          updated.master?.name,
+        ),
+        `ui-order-closed-#${updated.id}`
       );
     }
 
@@ -856,6 +955,30 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
         }),
         `order-rejection-#${updated.id}`
       );
+      
+      // ✅ UI уведомление директорам
+      this.fireAndForgetNotification(
+        this.notificationsService.sendUINotificationToDirectors(
+          updated.city,
+          'order_rejected',
+          updated.id,
+          updated.clientName,
+        ),
+        `ui-order-rejected-#${updated.id}`
+      );
+      
+      // ✅ UI уведомление мастеру (если назначен)
+      if (updated.masterId) {
+        this.fireAndForgetNotification(
+          this.notificationsService.sendUINotificationToMaster(
+            updated.masterId,
+            'master_order_rejected',
+            updated.id,
+            { clientName: updated.clientName, reason: dto.statusOrder },
+          ),
+          `ui-master-rejected-#${updated.id}`
+        );
+      }
     }
 
     // 6. Изменение мастера
@@ -905,7 +1028,49 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
           }),
           `master-assigned-#${updated.id}`
         );
+        
+        // ✅ UI уведомление мастеру
+        this.fireAndForgetNotification(
+          this.notificationsService.sendUINotificationToMaster(
+            dto.masterId,
+            'master_assigned',
+            updated.id,
+            {
+              clientName: updated.clientName,
+              address: updated.address,
+              dateMeeting: updated.dateMeeting?.toISOString(),
+            },
+          ),
+          `ui-master-assigned-#${updated.id}`
+        );
       }
+    }
+
+    // 7. Перенос даты - UI уведомление мастеру
+    if (dto.dateMeeting && order.dateMeeting?.toISOString() !== new Date(dto.dateMeeting).toISOString() && updated.masterId) {
+      this.fireAndForgetNotification(
+        this.notificationsService.sendUINotificationToMaster(
+          updated.masterId,
+          'master_order_rescheduled',
+          updated.id,
+          {
+            clientName: updated.clientName,
+            newDate: updated.dateMeeting?.toISOString(),
+          },
+        ),
+        `ui-master-rescheduled-#${updated.id}`
+      );
+      
+      // ✅ UI уведомление директорам о переносе
+      this.fireAndForgetNotification(
+        this.notificationsService.sendUINotificationToDirectors(
+          updated.city,
+          'order_rescheduled',
+          updated.id,
+          updated.clientName,
+        ),
+        `ui-order-rescheduled-#${updated.id}`
+      );
     }
   }
 

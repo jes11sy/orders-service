@@ -120,6 +120,7 @@ interface AddressChangeNotification {
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
   private readonly notificationsUrl: string;
+  private readonly realtimeUrl: string;
   private readonly webhookToken: string;
 
   constructor(
@@ -132,9 +133,110 @@ export class NotificationsService {
       baseUrl = `${baseUrl}/api/v1`;
     }
     this.notificationsUrl = baseUrl;
+    
+    // URL для realtime-service (in-app уведомления)
+    this.realtimeUrl = this.configService.get<string>('REALTIME_SERVICE_URL') || 'http://realtime-service:5007';
+    
     this.webhookToken = this.configService.get<string>('NOTIFICATIONS_WEBHOOK_TOKEN') || '';
     this.logger.log(`Notifications URL: ${this.notificationsUrl}`);
+    this.logger.log(`Realtime URL: ${this.realtimeUrl}`);
     this.logger.log(`Webhook token configured: ${this.webhookToken ? '✅' : '❌'}`);
+  }
+
+  // ============ UI (In-App) Уведомления через realtime-service ============
+
+  /**
+   * Отправить UI-уведомление директорам города
+   */
+  async sendUINotificationToDirectors(
+    city: string,
+    notificationType: 'order_new' | 'order_accepted' | 'order_rescheduled' | 'order_rejected' | 'order_closed',
+    orderId: number,
+    clientName?: string,
+    masterName?: string,
+    data?: Record<string, any>,
+  ): Promise<void> {
+    try {
+      await firstValueFrom(
+        this.httpService.post(
+          `${this.realtimeUrl}/api/v1/notifications/internal/directors/city`,
+          {
+            city,
+            notificationType,
+            orderId,
+            clientName,
+            masterName,
+            data,
+          },
+          { headers: { 'Content-Type': 'application/json' }, timeout: 3000 },
+        ),
+      );
+      this.logger.debug(`✅ UI notification (${notificationType}) sent to directors of ${city}`);
+    } catch (error) {
+      this.logger.warn(`⚠️ Failed to send UI notification to directors: ${error.message}`);
+    }
+  }
+
+  /**
+   * Отправить UI-уведомление мастеру
+   */
+  async sendUINotificationToMaster(
+    odooMasterId: number,
+    notificationType: 'master_assigned' | 'master_order_rescheduled' | 'master_order_rejected',
+    orderId: number,
+    options?: {
+      clientName?: string;
+      address?: string;
+      dateMeeting?: string;
+      newDate?: string;
+      reason?: string;
+    },
+  ): Promise<void> {
+    try {
+      await firstValueFrom(
+        this.httpService.post(
+          `${this.realtimeUrl}/api/v1/notifications/internal/master`,
+          {
+            odooMasterId,
+            notificationType,
+            orderId,
+            ...options,
+          },
+          { headers: { 'Content-Type': 'application/json' }, timeout: 3000 },
+        ),
+      );
+      this.logger.debug(`✅ UI notification (${notificationType}) sent to master ${odooMasterId}`);
+    } catch (error) {
+      this.logger.warn(`⚠️ Failed to send UI notification to master: ${error.message}`);
+    }
+  }
+
+  /**
+   * Отправить UI-уведомление оператору о заказе
+   */
+  async sendUINotificationToOperator(
+    operatorId: number,
+    actionType: 'order_created' | 'order_edited',
+    orderId: number,
+    clientName?: string,
+  ): Promise<void> {
+    try {
+      await firstValueFrom(
+        this.httpService.post(
+          `${this.realtimeUrl}/api/v1/notifications/internal/operator/order`,
+          {
+            operatorId,
+            actionType,
+            orderId,
+            clientName,
+          },
+          { headers: { 'Content-Type': 'application/json' }, timeout: 3000 },
+        ),
+      );
+      this.logger.debug(`✅ UI notification (${actionType}) sent to operator ${operatorId}`);
+    } catch (error) {
+      this.logger.warn(`⚠️ Failed to send UI notification to operator: ${error.message}`);
+    }
   }
 
   /**
