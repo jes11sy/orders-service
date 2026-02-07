@@ -31,12 +31,33 @@ export class QueryOrdersDto {
   @MaxLength(100)
   city?: string;
 
-  @ApiPropertyOptional({ description: 'Поисковый запрос', maximum: 100 })
+  @ApiPropertyOptional({ description: 'Поисковый запрос (общий)', maximum: 100 })
   @IsOptional()
   @IsString()
   @MaxLength(100)
   @Transform(({ value }) => value?.trim())
   search?: string;
+
+  @ApiPropertyOptional({ description: 'Поиск по ID заказа' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  @Transform(({ value }) => value?.trim())
+  searchId?: string;
+
+  @ApiPropertyOptional({ description: 'Поиск по номеру телефона' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  @Transform(({ value }) => value?.trim())
+  searchPhone?: string;
+
+  @ApiPropertyOptional({ description: 'Поиск по адресу' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  @Transform(({ value }) => value?.trim())
+  searchAddress?: string;
 
   @ApiPropertyOptional({ description: 'ID мастера' })
   @IsOptional()
