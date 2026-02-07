@@ -18,11 +18,11 @@ export class QueryOrdersDto {
   @Max(300)
   limit?: number = 50;
 
-  @ApiPropertyOptional({ description: 'Статус заказа' })
+  @ApiPropertyOptional({ description: 'Статус заказа (можно несколько через запятую: Готово,Отказ,Незаказ)' })
   @IsOptional()
   @IsString()
-  @MaxLength(50)
-  @IsIn(['Ожидает', 'Принял', 'В пути', 'В работе', 'Готово', 'Отказ', 'Модерн', 'Незаказ'])
+  @MaxLength(200)
+  @Transform(({ value }) => value?.trim())
   status?: string;
 
   @ApiPropertyOptional({ description: 'Город' })

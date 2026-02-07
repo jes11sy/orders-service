@@ -99,9 +99,18 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
 
     // Фильтры из query
     if (status) {
-      whereConditions.push(`o.status_order = $${paramIndex}`);
-      params.push(status);
-      paramIndex++;
+      // Поддержка множественных статусов через запятую (например: "Готово,Отказ,Незаказ")
+      const statuses = status.split(',').map(s => s.trim()).filter(s => s);
+      if (statuses.length === 1) {
+        whereConditions.push(`o.status_order = $${paramIndex}`);
+        params.push(statuses[0]);
+        paramIndex++;
+      } else if (statuses.length > 1) {
+        const placeholders = statuses.map((_, i) => `$${paramIndex + i}`).join(', ');
+        whereConditions.push(`o.status_order IN (${placeholders})`);
+        params.push(...statuses);
+        paramIndex += statuses.length;
+      }
     }
 
     if (city) {
