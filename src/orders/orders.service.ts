@@ -1482,6 +1482,33 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
       take: 100, // Последние 100 записей
     });
 
+    // Собираем уникальные логины для поиска ФИО
+    const logins = [...new Set(logs.map(log => log.login).filter(Boolean))] as string[];
+    
+    // Ищем ФИО в таблицах пользователей
+    const [operators, directors, masters] = await Promise.all([
+      this.prisma.callcentreOperator.findMany({
+        where: { login: { in: logins } },
+        select: { login: true, name: true },
+      }),
+      this.prisma.director.findMany({
+        where: { login: { in: logins } },
+        select: { login: true, name: true },
+      }),
+      this.prisma.master.findMany({
+        where: { login: { in: logins } },
+        select: { login: true, name: true },
+      }),
+    ]);
+
+    // Создаём карту login -> name
+    const loginToName = new Map<string, string>();
+    [...operators, ...directors, ...masters].forEach(user => {
+      if (user.login) {
+        loginToName.set(user.login, user.name);
+      }
+    });
+
     // Преобразуем для фронтенда
     const history = logs.map(log => ({
       id: log.id,
@@ -1490,6 +1517,7 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
       userId: log.userId,
       role: log.role,
       login: log.login,
+      userName: log.login ? loginToName.get(log.login) || null : null,
       metadata: log.metadata,
     }));
 
