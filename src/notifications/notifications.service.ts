@@ -182,7 +182,7 @@ export class NotificationsService {
    */
   async sendUINotificationToMaster(
     odooMasterId: number,
-    notificationType: 'master_assigned' | 'master_order_rescheduled' | 'master_order_rejected',
+    notificationType: 'master_assigned' | 'master_order_rescheduled' | 'master_order_rejected' | 'master_order_reassigned',
     orderId: number,
     options?: {
       clientName?: string;

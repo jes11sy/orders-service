@@ -1020,6 +1020,17 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
           }),
           `master-reassigned-#${updated.id}`
         );
+        
+        // ✅ UI + Push уведомление СТАРОМУ мастеру
+        this.fireAndForgetNotification(
+          this.notificationsService.sendUINotificationToMaster(
+            order.masterId, // старый мастер
+            'master_order_reassigned',
+            updated.id,
+            { clientName: updated.clientName },
+          ),
+          `ui-master-reassigned-#${updated.id}`
+        );
       }
       
       // Назначение мастера
