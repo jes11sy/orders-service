@@ -1148,6 +1148,12 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
           'order_rescheduled',
           updated.id,
           updated.clientName,
+          undefined, // masterName
+          {
+            address: updated.address,
+            dateMeeting: order.dateMeeting?.toISOString(),
+            newDateMeeting: updated.dateMeeting?.toISOString(),
+          },
         ),
         `ui-order-rescheduled-#${updated.id}`
       );
