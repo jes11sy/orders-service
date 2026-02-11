@@ -194,15 +194,17 @@ export class NotificationsService {
     },
   ): Promise<void> {
     try {
+      const payload = {
+        odooMasterId,
+        notificationType,
+        orderId,
+        ...options,
+      };
+      this.logger.debug(`[Notifications] Sending to realtime-service: ${JSON.stringify(payload)}`);
       await firstValueFrom(
         this.httpService.post(
           `${this.realtimeUrl}/api/v1/notifications/internal/master`,
-          {
-            odooMasterId,
-            notificationType,
-            orderId,
-            ...options,
-          },
+          payload,
           { headers: { 'Content-Type': 'application/json' }, timeout: 3000 },
         ),
       );

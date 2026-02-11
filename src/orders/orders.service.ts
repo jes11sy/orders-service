@@ -1050,6 +1050,7 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
         );
         
         // ✅ UI уведомление мастеру
+        this.logger.debug(`[Orders] Sending master notification: masterId=${dto.masterId}, orderId=${updated.id}, city=${updated.city}, address=${updated.address}`);
         this.fireAndForgetNotification(
           this.notificationsService.sendUINotificationToMaster(
             dto.masterId,
