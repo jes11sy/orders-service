@@ -187,6 +187,7 @@ export class NotificationsService {
     options?: {
       clientName?: string;
       address?: string;
+      city?: string;
       dateMeeting?: string;
       newDate?: string;
       reason?: string;

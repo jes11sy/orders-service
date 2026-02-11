@@ -1058,6 +1058,7 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
             {
               clientName: updated.clientName,
               address: updated.address,
+              city: updated.city,
               dateMeeting: updated.dateMeeting?.toISOString(),
             },
           ),
