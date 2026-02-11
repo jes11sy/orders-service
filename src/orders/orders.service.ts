@@ -403,6 +403,8 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
         'order_new',
         order.id,
         order.clientName,
+        undefined, // masterName (нет мастера при создании)
+        { address: order.address, dateMeeting: order.dateMeeting },
       ),
       `ui-new-order-#${order.id}`
     );
@@ -503,6 +505,8 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
         'order_new',
         order.id,
         order.clientName,
+        undefined, // masterName (нет мастера при создании)
+        { address: order.address, dateMeeting: order.dateMeeting },
       ),
       `ui-new-order-from-call-#${order.id}`
     );
@@ -581,6 +585,8 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
         'order_new',
         order.id,
         order.clientName,
+        undefined, // masterName (нет мастера при создании)
+        { address: order.address, dateMeeting: order.dateMeeting },
       ),
       `ui-new-order-from-chat-#${order.id}`
     );
@@ -949,10 +955,22 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
         }),
         `order-modern-#${updated.id}`
       );
+
+      // ✅ UI уведомление директорам
+      this.fireAndForgetNotification(
+        this.notificationsService.sendUINotificationToDirectors(
+          updated.city,
+          'order_modern',
+          updated.id,
+          updated.clientName,
+          updated.master?.name,
+        ),
+        `ui-order-modern-#${updated.id}`
+      );
     }
 
-    // 5. Отказ/Незаказ
-    if ((dto.statusOrder === 'Отказ' || dto.statusOrder === 'Незаказ') && order.statusOrder !== dto.statusOrder) {
+    // 5. Отказ
+    if (dto.statusOrder === 'Отказ' && order.statusOrder !== 'Отказ') {
       this.fireAndForgetNotification(
         this.notificationsService.sendOrderRejectionNotification({
           orderId: updated.id,
@@ -962,7 +980,47 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
           reason: dto.statusOrder!,
           masterId: updated.masterId || undefined,
         }),
-        `order-rejection-#${updated.id}`
+        `order-refusal-#${updated.id}`
+      );
+      
+      // ✅ UI уведомление директорам
+      this.fireAndForgetNotification(
+        this.notificationsService.sendUINotificationToDirectors(
+          updated.city,
+          'order_refusal',
+          updated.id,
+          updated.clientName,
+          updated.master?.name,
+        ),
+        `ui-order-refusal-#${updated.id}`
+      );
+      
+      // ✅ UI уведомление мастеру (если назначен)
+      if (updated.masterId) {
+        this.fireAndForgetNotification(
+          this.notificationsService.sendUINotificationToMaster(
+            updated.masterId,
+            'master_order_rejected',
+            updated.id,
+            { clientName: updated.clientName, reason: dto.statusOrder },
+          ),
+          `ui-master-refusal-#${updated.id}`
+        );
+      }
+    }
+
+    // 6. Незаказ
+    if (dto.statusOrder === 'Незаказ' && order.statusOrder !== 'Незаказ') {
+      this.fireAndForgetNotification(
+        this.notificationsService.sendOrderRejectionNotification({
+          orderId: updated.id,
+          city: updated.city,
+          clientName: updated.clientName,
+          phone: updated.phone,
+          reason: dto.statusOrder!,
+          masterId: updated.masterId || undefined,
+        }),
+        `order-noorder-#${updated.id}`
       );
       
       // ✅ UI уведомление директорам
@@ -985,12 +1043,12 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
             updated.id,
             { clientName: updated.clientName, reason: dto.statusOrder },
           ),
-          `ui-master-rejected-#${updated.id}`
+          `ui-master-noorder-#${updated.id}`
         );
       }
     }
 
-    // 6. Изменение мастера
+    // 7. Изменение мастера
     if (dto.masterId !== undefined && order.masterId !== dto.masterId) {
       // Мастер отказался
       if (order.masterId && dto.masterId === null) {
@@ -1068,7 +1126,7 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    // 7. Перенос даты - UI уведомление мастеру
+    // 8. Перенос даты - UI уведомление мастеру
     if (dto.dateMeeting && order.dateMeeting?.toISOString() !== new Date(dto.dateMeeting).toISOString() && updated.masterId) {
       this.fireAndForgetNotification(
         this.notificationsService.sendUINotificationToMaster(

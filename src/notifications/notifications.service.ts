@@ -150,7 +150,7 @@ export class NotificationsService {
    */
   async sendUINotificationToDirectors(
     city: string,
-    notificationType: 'order_new' | 'order_accepted' | 'order_rescheduled' | 'order_rejected' | 'order_closed',
+    notificationType: 'order_new' | 'order_accepted' | 'order_rescheduled' | 'order_rejected' | 'order_refusal' | 'order_closed' | 'order_modern',
     orderId: number,
     clientName?: string,
     masterName?: string,
