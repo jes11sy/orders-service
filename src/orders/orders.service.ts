@@ -404,7 +404,7 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
         order.id,
         order.clientName,
         undefined, // masterName (нет мастера при создании)
-        { address: order.address, dateMeeting: order.dateMeeting },
+        { address: order.address, dateMeeting: order.dateMeeting.toISOString() },
       ),
       `ui-new-order-#${order.id}`
     );
@@ -506,7 +506,7 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
         order.id,
         order.clientName,
         undefined, // masterName (нет мастера при создании)
-        { address: order.address, dateMeeting: order.dateMeeting },
+        { address: order.address, dateMeeting: order.dateMeeting.toISOString() },
       ),
       `ui-new-order-from-call-#${order.id}`
     );
@@ -586,7 +586,7 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
         order.id,
         order.clientName,
         undefined, // masterName (нет мастера при создании)
-        { address: order.address, dateMeeting: order.dateMeeting },
+        { address: order.address, dateMeeting: order.dateMeeting.toISOString() },
       ),
       `ui-new-order-from-chat-#${order.id}`
     );
@@ -904,6 +904,10 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
           updated.id,
           updated.clientName,
           updated.master?.name,
+          {
+            address: updated.address,
+            dateMeeting: updated.dateMeeting?.toISOString(),
+          },
         ),
         `ui-order-accepted-#${updated.id}`
       );
@@ -933,6 +937,12 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
           updated.id,
           updated.clientName,
           updated.master?.name,
+          {
+            total: updated.result?.toString(),
+            expense: updated.expenditure?.toString(),
+            net: updated.clean?.toString(),
+            handover: updated.masterChange?.toString(),
+          },
         ),
         `ui-order-closed-#${updated.id}`
       );
@@ -964,6 +974,10 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
           updated.id,
           updated.clientName,
           updated.master?.name,
+          {
+            address: updated.address,
+            dateMeeting: updated.dateMeeting?.toISOString(),
+          },
         ),
         `ui-order-modern-#${updated.id}`
       );
@@ -991,6 +1005,10 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
           updated.id,
           updated.clientName,
           updated.master?.name,
+          {
+            address: updated.address,
+            dateMeeting: updated.dateMeeting?.toISOString(),
+          },
         ),
         `ui-order-refusal-#${updated.id}`
       );
@@ -1030,6 +1048,11 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
           'order_rejected',
           updated.id,
           updated.clientName,
+          undefined, // masterName
+          {
+            address: updated.address,
+            dateMeeting: updated.dateMeeting?.toISOString(),
+          },
         ),
         `ui-order-rejected-#${updated.id}`
       );
