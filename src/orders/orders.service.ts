@@ -1155,7 +1155,6 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
 
     // 8. Перенос даты
     if (dto.dateMeeting && order.dateMeeting?.toISOString() !== new Date(dto.dateMeeting).toISOString()) {
-      this.logger.log(`[DEBUG] Date changed for order #${updated.id}, sending UI notifications`);
       // UI уведомление мастеру (если назначен)
       if (updated.masterId) {
         this.fireAndForgetNotification(
