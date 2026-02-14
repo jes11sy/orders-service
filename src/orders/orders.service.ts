@@ -64,9 +64,13 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
    * Уведомления не должны блокировать основной процесс
    */
   private fireAndForgetNotification(notificationPromise: Promise<void>, context: string) {
-    notificationPromise.catch(err => {
-      this.logger.error(`Failed to send notification (${context}): ${err.message}`);
-    });
+    notificationPromise
+      .then(() => {
+        this.logger.log(`✅ Notification sent successfully (${context})`);
+      })
+      .catch(err => {
+        this.logger.error(`❌ Failed to send notification (${context}): ${err.message}`);
+      });
   }
 
   // ✅ ОПТИМИЗАЦИЯ: SQL сортировка с CASE WHEN вместо загрузки всех заказов в память

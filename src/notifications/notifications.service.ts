@@ -168,12 +168,17 @@ export class NotificationsService {
             masterName,
             data,
           },
-          { headers: { 'Content-Type': 'application/json' }, timeout: 3000 },
+          { headers: { 'Content-Type': 'application/json' }, timeout: 10000 },
         ),
       );
-      this.logger.debug(`✅ UI notification (${notificationType}) sent to directors of ${city}`);
+      this.logger.log(`✅ UI notification (${notificationType}) sent to directors of ${city} for order #${orderId}`);
     } catch (error) {
-      this.logger.warn(`⚠️ Failed to send UI notification to directors: ${error.message}`);
+      this.logger.error(`❌ Failed to send UI notification to directors: ${error.message}`, {
+        city,
+        notificationType,
+        orderId,
+        url: `${this.realtimeUrl}/api/v1/notifications/internal/directors/city`,
+      });
     }
   }
 
