@@ -1153,29 +1153,33 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    // 8. Перенос даты - UI уведомление мастеру
-    if (dto.dateMeeting && order.dateMeeting?.toISOString() !== new Date(dto.dateMeeting).toISOString() && updated.masterId) {
-      this.fireAndForgetNotification(
-        this.notificationsService.sendUINotificationToMaster(
-          updated.masterId,
-          'master_order_rescheduled',
-          updated.id,
-          {
-            clientName: updated.clientName,
-            newDate: updated.dateMeeting?.toISOString(),
-          },
-        ),
-        `ui-master-rescheduled-#${updated.id}`
-      );
+    // 8. Перенос даты
+    if (dto.dateMeeting && order.dateMeeting?.toISOString() !== new Date(dto.dateMeeting).toISOString()) {
+      this.logger.log(`[DEBUG] Date changed for order #${updated.id}, sending UI notifications`);
+      // UI уведомление мастеру (если назначен)
+      if (updated.masterId) {
+        this.fireAndForgetNotification(
+          this.notificationsService.sendUINotificationToMaster(
+            updated.masterId,
+            'master_order_rescheduled',
+            updated.id,
+            {
+              clientName: updated.clientName,
+              newDate: updated.dateMeeting?.toISOString(),
+            },
+          ),
+          `ui-master-rescheduled-#${updated.id}`
+        );
+      }
       
-      // ✅ UI уведомление директорам о переносе
+      // ✅ UI уведомление директорам о переносе (всегда)
       this.fireAndForgetNotification(
         this.notificationsService.sendUINotificationToDirectors(
           updated.city,
           'order_rescheduled',
           updated.id,
           updated.clientName,
-          undefined, // masterName
+          updated.master?.name, // masterName если есть
           {
             address: updated.address,
             dateMeeting: order.dateMeeting?.toISOString(),
