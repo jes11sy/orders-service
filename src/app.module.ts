@@ -5,6 +5,7 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { OrdersModule } from './orders/orders.module';
 import { SiteOrdersModule } from './site-orders/site-orders.module';
+import { ReferencesModule } from './references/references.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { NotificationsModule } from './notifications/notifications.module';
@@ -40,6 +41,7 @@ import { RequestLoggerMiddleware } from './middleware/request-logger.middleware'
     AuthModule,
     OrdersModule,
     SiteOrdersModule,
+    ReferencesModule,
     NotificationsModule,
     AuditModule,
   ],
