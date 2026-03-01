@@ -1,26 +1,22 @@
-import { IsString, IsOptional, IsNumber, IsDateString, MaxLength, Matches, IsIn, Min, Max, ValidateIf, IsBoolean, IsArray } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsDateString, MaxLength, Matches, Min, Max, ValidateIf, IsBoolean, IsArray } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 
 export class UpdateOrderDto {
   // Основные поля заказа
-  @ApiProperty({ required: false, description: 'Рекламная кампания' })
-  @IsString()
+  @ApiProperty({ required: false, description: 'ID рекламной кампании' })
+  @Type(() => Number)
+  @IsNumber()
   @IsOptional()
-  @MaxLength(50)
-  rk?: string;
+  @Min(1)
+  rkId?: number;
 
-  @ApiProperty({ required: false, description: 'Город' })
-  @IsString()
+  @ApiProperty({ required: false, description: 'ID города' })
+  @Type(() => Number)
+  @IsNumber()
   @IsOptional()
-  @MaxLength(100)
-  city?: string;
-
-  @ApiProperty({ required: false, description: 'Имя аккаунта Avito' })
-  @IsString()
-  @IsOptional()
-  @MaxLength(100)
-  avitoName?: string;
+  @Min(1)
+  cityId?: number;
 
   @ApiProperty({ required: false, description: 'Телефон клиента' })
   @IsString()
@@ -29,11 +25,12 @@ export class UpdateOrderDto {
   @MaxLength(15)
   phone?: string;
 
-  @ApiProperty({ required: false, description: 'Тип заказа' })
-  @IsString()
+  @ApiProperty({ required: false, description: 'ID типа заказа' })
+  @Type(() => Number)
+  @IsNumber()
   @IsOptional()
-  @MaxLength(100)
-  typeOrder?: string;
+  @Min(1)
+  orderTypeId?: number;
 
   @ApiProperty({ required: false, description: 'Имя клиента' })
   @IsString()
@@ -54,23 +51,18 @@ export class UpdateOrderDto {
   @IsOptional()
   dateMeeting?: string;
 
-  @ApiProperty({ required: false, description: 'Тип оборудования' })
-  @IsString()
+  @ApiProperty({ required: false, description: 'ID типа оборудования' })
+  @Type(() => Number)
+  @IsNumber()
   @IsOptional()
-  @MaxLength(200)
-  typeEquipment?: string;
+  @Min(1)
+  equipmentTypeId?: number;
 
   @ApiProperty({ required: false, description: 'Описание проблемы' })
   @IsString()
   @IsOptional()
   @MaxLength(2000)
   problem?: string;
-
-  @ApiProperty({ required: false, description: 'ID чата Avito' })
-  @IsString()
-  @IsOptional()
-  @MaxLength(100)
-  avitoChatId?: string;
 
   @ApiProperty({ required: false, description: 'ID звонка' })
   @IsString()
@@ -83,16 +75,16 @@ export class UpdateOrderDto {
   @IsNumber()
   @IsOptional()
   @Min(1)
-  operatorNameId?: number;
-  
-  // Поля статуса и мастера
-  @ApiProperty({ required: false, description: 'Статус заказа' })
-  @IsString()
-  @IsOptional()
-  @IsIn(['Ожидает', 'Принял', 'В пути', 'В работе', 'Готово', 'Отказ', 'Модерн', 'Незаказ'])
-  statusOrder?: string;
+  operatorId?: number;
 
-  // ✅ FIX: Разрешаем null для снятия мастера с заказа
+  // Поля статуса и мастера
+  @ApiProperty({ required: false, description: 'ID статуса заказа' })
+  @Type(() => Number)
+  @IsNumber()
+  @IsOptional()
+  @Min(1)
+  statusId?: number;
+
   @ApiProperty({ required: false, description: 'ID мастера (null для снятия)', nullable: true })
   @ValidateIf((o) => o.masterId !== null)
   @Type(() => Number)
@@ -100,7 +92,7 @@ export class UpdateOrderDto {
   @IsOptional()
   @Min(1)
   masterId?: number | null;
-  
+
   // Финансовые поля
   @ApiProperty({ required: false, description: 'Итоговая сумма' })
   @Type(() => Number)
@@ -141,8 +133,8 @@ export class UpdateOrderDto {
   @Min(0)
   @Max(999999)
   prepayment?: number;
-  
-  // Документы
+
+  // Документы (хранятся в order_documents)
   @ApiProperty({ required: false, description: 'Массив документов БСО', type: [String], nullable: true })
   @ValidateIf((o) => o.bsoDoc !== null)
   @IsArray()
@@ -162,18 +154,18 @@ export class UpdateOrderDto {
   @IsOptional()
   @MaxLength(500)
   cashReceiptDoc?: string;
-  
+
   // Даты
   @ApiProperty({ required: false, description: 'Дата закрытия' })
   @IsDateString()
   @IsOptional()
-  closingData?: string;
+  closingAt?: string;
 
   @ApiProperty({ required: false, description: 'Дата закрытия модерна' })
   @IsDateString()
   @IsOptional()
-  dateClosmod?: string;
-  
+  dateCloseMod?: string;
+
   // Дополнительные поля
   @ApiProperty({ required: false, description: 'Комментарий' })
   @IsString()
@@ -182,6 +174,7 @@ export class UpdateOrderDto {
   @Matches(/^[^<>]*$/, { message: 'HTML теги не разрешены' })
   comment?: string;
 
+  // Касса (хранится в cash_submissions)
   @ApiProperty({ required: false, description: 'Статус подачи кассы' })
   @IsString()
   @IsOptional()
@@ -195,18 +188,4 @@ export class UpdateOrderDto {
   @Min(0)
   @Max(999999)
   cashSubmissionAmount?: number;
-
-  @ApiProperty({ required: false, description: 'Партнер' })
-  @IsBoolean()
-  @IsOptional()
-  partner?: boolean;
-
-  @ApiProperty({ required: false, description: 'Процент партнера' })
-  @Type(() => Number)
-  @IsNumber()
-  @IsOptional()
-  @Min(0)
-  @Max(100)
-  partnerPercent?: number;
 }
-

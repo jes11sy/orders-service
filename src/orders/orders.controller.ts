@@ -69,21 +69,9 @@ export class OrdersController {
   @Get('statuses')
   @UseGuards(CookieJwtAuthGuard, RolesGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Get available order statuses' })
+  @ApiOperation({ summary: 'Get available order statuses from references_service' })
   async getOrderStatuses() {
-    return {
-      success: true,
-      data: [
-        'Ожидает',
-        'Принял', 
-        'В пути',
-        'В работе',
-        'Готово',
-        'Отказ',
-        'Модерн',
-        'Незаказ'
-      ]
-    };
+    return this.ordersService.getFilterOptions({ userId: 0, role: 'admin', login: '', name: '', sub: 0 } as any);
   }
 
   @Get('filter-options')
@@ -228,7 +216,7 @@ export class OrdersController {
     // Логируем обновление или закрытие заказа
     const userAgent = req.headers['user-agent'] || 'Unknown';
     
-    if (dto.statusOrder === 'Готово') {
+    if (dto.statusId !== undefined && result.data?.status?.code === 'done') {
       // Закрытие заказа
       await this.auditService.logOrderClose(
         +id,
@@ -242,10 +230,9 @@ export class OrdersController {
     } else {
       // Обычное обновление - сравниваем что изменилось
       const changes: any = {};
-      
-      // Сравниваем основные поля
-      if (dto.statusOrder !== undefined && oldOrder?.statusOrder !== dto.statusOrder) {
-        changes.statusOrder = { old: oldOrder?.statusOrder, new: dto.statusOrder };
+
+      if (dto.statusId !== undefined && oldOrder?.statusId !== dto.statusId) {
+        changes.statusId = { old: oldOrder?.statusId, new: dto.statusId };
       }
       if (dto.masterId !== undefined && oldOrder?.masterId !== dto.masterId) {
         changes.masterId = { old: oldOrder?.masterId, new: dto.masterId };
@@ -269,7 +256,7 @@ export class OrdersController {
       if (dto.problem !== undefined && oldOrder?.problem !== dto.problem) {
         changes.problem = { old: oldOrder?.problem, new: dto.problem };
       }
-      
+
       await this.auditService.logOrderUpdate(
         +id,
         req.user.userId,
@@ -289,12 +276,10 @@ export class OrdersController {
   @ApiBearerAuth()
   @Roles(UserRole.OPERATOR, UserRole.DIRECTOR, UserRole.MASTER)
   @ApiOperation({ summary: 'Update order status' })
-  async updateStatus(@Param('id') id: string, @Body('status') status: string, @Request() req: AuthenticatedRequest, @Ip() ip: string) {
-    // ✅ FIX #35: Убран лишний запрос к БД - oldStatus возвращается из updateStatus
-    const result = await this.ordersService.updateStatus(+id, status, req.user, req.headers);
-    
-    // Логируем изменение статуса
-    if (result.oldStatus) {
+  async updateStatus(@Param('id') id: string, @Body('statusId') statusId: number, @Request() req: AuthenticatedRequest, @Ip() ip: string) {
+    const result = await this.ordersService.updateStatus(+id, +statusId, req.user, req.headers);
+
+    if (result.oldStatusId) {
       const userAgent = req.headers['user-agent'] || 'Unknown';
       await this.auditService.logOrderStatusChange(
         +id,
@@ -303,11 +288,11 @@ export class OrdersController {
         req.user.login,
         ip,
         userAgent as string,
-        result.oldStatus,
-        status
+        String(result.oldStatusId),
+        String(statusId)
       );
     }
-    
+
     return result;
   }
 

@@ -12,17 +12,33 @@ import { maskSensitiveData, getFieldNames } from '../utils/masking.util';
 import { firstValueFrom, timeout, catchError } from 'rxjs';
 import { NotificationsService } from '../notifications/notifications.service';
 
+// Коды статусов заказов (должны совпадать с данными в references_service.order_statuses)
+const STATUS = {
+  WAITING: 'waiting',
+  ACCEPTED: 'accepted',
+  ON_WAY: 'on_way',
+  IN_WORK: 'in_work',
+  MODERN: 'modern',
+  DONE: 'done',
+  REJECTED: 'rejected',
+  NO_ORDER: 'no_order',
+} as const;
+
+const TERMINAL_STATUS_CODES = [STATUS.DONE, STATUS.REJECTED, STATUS.NO_ORDER];
+
 @Injectable()
 export class OrdersService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(OrdersService.name);
 
-  // ✅ FIX: Кэш для getFilterOptions (предотвращает timeout при частых запросах)
-  // ✅ FIX: LRU-кэш с отслеживанием lastAccess для eviction
+  // Кэш для getFilterOptions (предотвращает timeout при частых запросах)
   private filterOptionsCache = new Map<string, { data: any; expiry: number; lastAccess: number }>();
-  private readonly FILTER_OPTIONS_CACHE_TTL = 60 * 1000; // 1 минута
-  // ✅ FIX: Ограничение размера кэша для предотвращения утечки памяти
-  private readonly FILTER_OPTIONS_CACHE_MAX_SIZE = 100; // Максимум 100 записей
+  private readonly FILTER_OPTIONS_CACHE_TTL = 60 * 1000;
+  private readonly FILTER_OPTIONS_CACHE_MAX_SIZE = 100;
   private cacheCleanupInterval: NodeJS.Timeout | null = null;
+
+  // Кэш статусов: code → id (загружается один раз, обновляется по необходимости)
+  private statusCodeToId = new Map<string, number>();
+  private statusIdToCode = new Map<number, string>();
 
   constructor(
     private prisma: PrismaService,
@@ -30,9 +46,7 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
     private notificationsService: NotificationsService,
   ) {}
 
-  // ✅ FIX: Запуск автоочистки кэша при старте модуля
   onModuleInit() {
-    // Очистка устаревших записей каждые 5 минут
     this.cacheCleanupInterval = setInterval(() => {
       const now = Date.now();
       let cleaned = 0;
@@ -42,14 +56,11 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
           cleaned++;
         }
       }
-      if (cleaned > 0) {
-        this.logger.debug(`[Cache] Cleaned ${cleaned} expired entries`);
-      }
-    }, 5 * 60 * 1000); // 5 минут
+      if (cleaned > 0) this.logger.debug(`[Cache] Cleaned ${cleaned} expired entries`);
+    }, 5 * 60 * 1000);
     this.logger.log('✅ Filter options cache cleanup started');
   }
 
-  // ✅ FIX: Остановка интервала при уничтожении модуля
   onModuleDestroy() {
     if (this.cacheCleanupInterval) {
       clearInterval(this.cacheCleanupInterval);
@@ -59,365 +70,383 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
     this.logger.log('✅ Filter options cache cleanup stopped');
   }
 
-  /**
-   * ✅ ОПТИМИЗАЦИЯ: Обертка для fire-and-forget отправки уведомлений
-   * Уведомления не должны блокировать основной процесс
-   */
-  private fireAndForgetNotification(notificationPromise: Promise<void>, context: string) {
-    notificationPromise
-      .then(() => {
-        this.logger.log(`✅ Notification sent successfully (${context})`);
-      })
-      .catch(err => {
-        this.logger.error(`❌ Failed to send notification (${context}): ${err.message}`);
-      });
+  // Загрузка и кэширование статусов из БД
+  private async loadStatusCache() {
+    if (this.statusCodeToId.size > 0) return;
+    const statuses = await this.prisma.orderStatus.findMany({
+      select: { id: true, code: true },
+    });
+    for (const s of statuses) {
+      this.statusCodeToId.set(s.code, s.id);
+      this.statusIdToCode.set(s.id, s.code);
+    }
   }
 
-  // ✅ ОПТИМИЗАЦИЯ: SQL сортировка с CASE WHEN вместо загрузки всех заказов в память
+  private async getStatusIdByCode(code: string): Promise<number | undefined> {
+    await this.loadStatusCache();
+    return this.statusCodeToId.get(code);
+  }
+
+  private async getStatusCodeById(id: number): Promise<string | undefined> {
+    await this.loadStatusCache();
+    return this.statusIdToCode.get(id);
+  }
+
+  private fireAndForgetNotification(notificationPromise: Promise<void>, context: string) {
+    notificationPromise
+      .then(() => this.logger.log(`✅ Notification sent (${context})`))
+      .catch(err => this.logger.error(`❌ Notification failed (${context}): ${err.message}`));
+  }
+
+  // ─────────────────────────────────────────
+  // ORDERS LIST (Raw SQL с JOIN)
+  // ─────────────────────────────────────────
+
   async getOrders(query: QueryOrdersDto, user: AuthUser) {
     const startTime = Date.now();
-    const { page = 1, limit = 50, status, city, search, searchId, searchPhone, searchAddress, masterId, master, closingDate, rk, typeEquipment, dateType, dateFrom, dateTo } = query;
+    const {
+      page = 1, limit = 50, statusIds, cityId, search, searchId,
+      searchPhone, searchAddress, masterId, master, closingDate,
+      rkId, equipmentTypeId, dateType, dateFrom, dateTo,
+    } = query;
     const skip = (page - 1) * limit;
-    
-    this.logger.debug(`[getOrders] START: user=${user.userId} (${user.role}), page=${page}, limit=${limit}, filters=${JSON.stringify({ status, city, search: search ? '***' : null, masterId, master, rk, typeEquipment })}`);
-    
+
+    this.logger.debug(`[getOrders] user=${user.userId} (${user.role}), page=${page}, limit=${limit}`);
+
     try {
+      const whereConditions: string[] = [];
+      const params: any[] = [];
+      let p = 1;
 
-    // Строим WHERE условия для SQL
-    const whereConditions: string[] = [];
-    const params: any[] = [];
-    let paramIndex = 1;
-
-    // RBAC фильтры
-    if (user.role === 'master') {
-      whereConditions.push(`o.master_id = $${paramIndex}`);
-      params.push(user.userId);
-      paramIndex++;
-    }
-
-    if (user.role === 'director' && user.cities && user.cities.length > 0) {
-      whereConditions.push(`o.city = ANY($${paramIndex}::text[])`);
-      params.push(user.cities);
-      paramIndex++;
-    }
-
-    // Фильтры из query
-    if (status) {
-      // Поддержка множественных статусов через запятую (например: "Готово,Отказ,Незаказ")
-      const statuses = status.split(',').map(s => s.trim()).filter(s => s);
-      if (statuses.length === 1) {
-        whereConditions.push(`o.status_order = $${paramIndex}`);
-        params.push(statuses[0]);
-        paramIndex++;
-      } else if (statuses.length > 1) {
-        const placeholders = statuses.map((_, i) => `$${paramIndex + i}`).join(', ');
-        whereConditions.push(`o.status_order IN (${placeholders})`);
-        params.push(...statuses);
-        paramIndex += statuses.length;
-      }
-    }
-
-    if (city) {
-      whereConditions.push(`o.city = $${paramIndex}`);
-      params.push(city);
-      paramIndex++;
-    }
-
-    if (masterId) {
-      whereConditions.push(`o.master_id = $${paramIndex}`);
-      params.push(+masterId);
-      paramIndex++;
-    }
-
-    if (rk) {
-      whereConditions.push(`o.rk = $${paramIndex}`);
-      params.push(rk);
-      paramIndex++;
-    }
-
-    if (typeEquipment) {
-      whereConditions.push(`o.type_equipment = $${paramIndex}`);
-      params.push(typeEquipment);
-      paramIndex++;
-    }
-
-    // Фильтр по имени мастера
-    if (master) {
-      whereConditions.push(`m.name ILIKE $${paramIndex}`);
-      params.push(`%${master}%`);
-      paramIndex++;
-    }
-
-    // Фильтр по дате закрытия (старый параметр для обратной совместимости)
-    if (closingDate) {
-      const date = new Date(closingDate);
-      const nextDay = new Date(date);
-      nextDay.setDate(nextDay.getDate() + 1);
-
-      whereConditions.push(`o.closing_data >= $${paramIndex} AND o.closing_data < $${paramIndex + 1}`);
-      params.push(date, nextDay);
-      paramIndex += 2;
-    }
-
-    // Новый фильтр по диапазону дат
-    if (dateFrom || dateTo) {
-      let dateField = 'o.create_date';
-      switch (dateType) {
-        case 'close':
-          dateField = 'o.closing_data';
-          break;
-        case 'meeting':
-          dateField = 'o.date_meeting';
-          break;
+      // RBAC фильтры
+      if (user.role === 'master') {
+        whereConditions.push(`o.master_id = $${p++}`);
+        params.push(user.userId);
       }
 
-      if (dateFrom) {
-        const fromDate = new Date(dateFrom);
-        fromDate.setHours(0, 0, 0, 0);
-        whereConditions.push(`${dateField} >= $${paramIndex}`);
-        params.push(fromDate);
-        paramIndex++;
+      if (user.role === 'director' && user.cityIds && user.cityIds.length > 0) {
+        whereConditions.push(`o.city_id = ANY($${p++}::int[])`);
+        params.push(user.cityIds);
       }
 
-      if (dateTo) {
-        const toDate = new Date(dateTo);
-        toDate.setHours(23, 59, 59, 999);
-        whereConditions.push(`${dateField} <= $${paramIndex}`);
-        params.push(toDate);
-        paramIndex++;
+      // Фильтры из query
+      if (statusIds) {
+        const ids = statusIds.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n > 0);
+        if (ids.length === 1) {
+          whereConditions.push(`o.status_id = $${p++}`);
+          params.push(ids[0]);
+        } else if (ids.length > 1) {
+          whereConditions.push(`o.status_id = ANY($${p++}::int[])`);
+          params.push(ids);
+        }
       }
-    }
 
-    // ✅ ОПТИМИЗАЦИЯ: Полнотекстовый поиск с использованием pg_trgm индексов
-    // После применения миграции 001_add_performance_indexes.sql, ILIKE запросы будут использовать GIN индексы
-    // Скорость поиска: 500ms → 50ms (10x ускорение)
-    if (search) {
-      const searchAsNumber = parseInt(search, 10);
-      if (!isNaN(searchAsNumber) && searchAsNumber > 0 && searchAsNumber < 1000000) {
-        // Поиск по телефону/имени/адресу ИЛИ точное совпадение по ID
-        whereConditions.push(`(o.phone ILIKE $${paramIndex} OR o.client_name ILIKE $${paramIndex} OR o.address ILIKE $${paramIndex} OR o.id = $${paramIndex + 1})`);
-        params.push(`%${search}%`, searchAsNumber);
-        paramIndex += 2;
-      } else {
-        // Поиск только по текстовым полям (использует idx_orders_*_trgm индексы)
-        whereConditions.push(`(o.phone ILIKE $${paramIndex} OR o.client_name ILIKE $${paramIndex} OR o.address ILIKE $${paramIndex})`);
-        params.push(`%${search}%`);
-        paramIndex++;
+      if (cityId) {
+        whereConditions.push(`o.city_id = $${p++}`);
+        params.push(cityId);
       }
-    }
 
-    // Поиск по ID заказа (отдельное поле)
-    if (searchId) {
-      const idAsNumber = parseInt(searchId, 10);
-      if (!isNaN(idAsNumber) && idAsNumber > 0) {
-        whereConditions.push(`o.id = $${paramIndex}`);
-        params.push(idAsNumber);
-        paramIndex++;
+      if (masterId) {
+        whereConditions.push(`o.master_id = $${p++}`);
+        params.push(+masterId);
       }
-    }
 
-    // Поиск по номеру телефона (отдельное поле)
-    if (searchPhone) {
-      whereConditions.push(`o.phone ILIKE $${paramIndex}`);
-      params.push(`%${searchPhone}%`);
-      paramIndex++;
-    }
+      if (rkId) {
+        whereConditions.push(`o.rk_id = $${p++}`);
+        params.push(+rkId);
+      }
 
-    // Поиск по адресу (отдельное поле)
-    if (searchAddress) {
-      whereConditions.push(`o.address ILIKE $${paramIndex}`);
-      params.push(`%${searchAddress}%`);
-      paramIndex++;
-    }
+      if (equipmentTypeId) {
+        whereConditions.push(`o.equipment_type_id = $${p++}`);
+        params.push(+equipmentTypeId);
+      }
 
-    const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+      if (master) {
+        whereConditions.push(`m.name ILIKE $${p++}`);
+        params.push(`%${master}%`);
+      }
 
-    // ✅ SQL запрос с кастомной сортировкой через CASE WHEN
-    const ordersQuery = `
-      SELECT 
-        o.id,
-        o.rk,
-        o.city,
-        o.avito_name as "avitoName",
-        o.phone,
-        o.type_order as "typeOrder",
-        o.client_name as "clientName",
-        o.address,
-        o.date_meeting as "dateMeeting",
-        o.type_equipment as "typeEquipment",
-        o.problem,
-        o.call_record as "callRecord",
-        o.status_order as "statusOrder",
-        o.master_id as "masterId",
-        o.result,
-        o.expenditure,
-        o.clean,
-        o.master_change as "masterChange",
-        o.bso_doc as "bsoDoc",
-        o.expenditure_doc as "expenditureDoc",
-        o.operator_name_id as "operatorNameId",
-        o.create_date as "createDate",
-        o.closing_data as "closingData",
-        o.created_at as "createdAt",
-        o.updated_at as "updatedAt",
-        o.avito_chatid as "avitoChatId",
-        o.call_id as "callId",
-        o.prepayment,
-        o.date_closmod as "dateClosmod",
-        o.comment,
-        o.cash_submission_status as "cashSubmissionStatus",
-        o.cash_submission_date as "cashSubmissionDate",
-        o.cash_submission_amount as "cashSubmissionAmount",
-        o.cash_receipt_doc as "cashReceiptDoc",
-        o.partner,
-        o.partner_percent as "partnerPercent",
-        json_build_object(
-          'id', op.id,
-          'name', op.name,
-          'login', op.login
-        ) as operator,
-        CASE 
-          WHEN m.id IS NOT NULL THEN json_build_object('id', m.id, 'name', m.name)
-          ELSE NULL
-        END as master
-      FROM orders o
-      LEFT JOIN callcentre_operator op ON o.operator_name_id = op.id
-      LEFT JOIN master m ON o.master_id = m.id
-      ${whereClause}
-      ORDER BY 
-        -- Приоритет статуса (активные выше закрытых)
-        CASE 
-          WHEN o.status_order = 'Ожидает' THEN 1
-          WHEN o.status_order = 'Принял' THEN 2
-          WHEN o.status_order = 'В пути' THEN 3
-          WHEN o.status_order = 'В работе' THEN 4
-          WHEN o.status_order = 'Модерн' THEN 5
-          WHEN o.status_order IN ('Готово', 'Отказ', 'Незаказ') THEN 6
-          ELSE 7
-        END ASC,
-        -- Для активных статусов: сортировка по дате встречи (ранние сначала)
-        CASE 
-          WHEN o.status_order IN ('Ожидает', 'Принял', 'В пути', 'В работе', 'Модерн') 
-          THEN o.date_meeting 
-        END ASC NULLS LAST,
-        -- Для закрытых статусов: сортировка по дате закрытия (свежие сначала)
-        CASE 
-          WHEN o.status_order IN ('Готово', 'Отказ', 'Незаказ')
-          THEN o.closing_data
-        END DESC NULLS LAST
-      LIMIT $${paramIndex}
-      OFFSET $${paramIndex + 1}
-    `;
+      if (closingDate) {
+        const date = new Date(closingDate);
+        const nextDay = new Date(date);
+        nextDay.setDate(nextDay.getDate() + 1);
+        whereConditions.push(`o.closing_at >= $${p++} AND o.closing_at < $${p++}`);
+        params.push(date, nextDay);
+      }
 
-    params.push(limit, skip);
+      if (dateFrom || dateTo) {
+        let dateField = 'o.created_at';
+        if (dateType === 'close') dateField = 'o.closing_at';
+        if (dateType === 'meeting') dateField = 'o.date_meeting';
 
-    // Выполняем запросы параллельно
-    const [orders, totalResult] = await Promise.all([
-      this.prisma.$queryRawUnsafe<any[]>(ordersQuery, ...params),
-      this.prisma.$queryRawUnsafe<[{ count: bigint }]>(
-        `SELECT COUNT(*) as count FROM orders o
-         LEFT JOIN master m ON o.master_id = m.id
-         ${whereClause}`,
-        ...params.slice(0, -2) // Убираем LIMIT и OFFSET из параметров для COUNT
-      ),
-    ]);
+        if (dateFrom) {
+          const d = new Date(dateFrom);
+          d.setHours(0, 0, 0, 0);
+          whereConditions.push(`${dateField} >= $${p++}`);
+          params.push(d);
+        }
+        if (dateTo) {
+          const d = new Date(dateTo);
+          d.setHours(23, 59, 59, 999);
+          whereConditions.push(`${dateField} <= $${p++}`);
+          params.push(d);
+        }
+      }
 
-    // S3 base URL для преобразования путей в полные URL
-    const s3BaseUrl = process.env.S3_BASE_URL || 'https://s3.twcstorage.ru/f7eead03-crmfiles';
-    
-    // Преобразуем типы данных и пути к файлам в полные URL
-    const transformedOrders = orders.map(order => ({
-      ...order,
-      result: order.result ? parseFloat(order.result) : null,
-      expenditure: order.expenditure ? parseFloat(order.expenditure) : null,
-      clean: order.clean ? parseFloat(order.clean) : null,
-      masterChange: order.masterChange ? parseFloat(order.masterChange) : null,
-      prepayment: order.prepayment ? parseFloat(order.prepayment) : null,
-      cashSubmissionAmount: order.cashSubmissionAmount ? parseFloat(order.cashSubmissionAmount) : null,
-      partnerPercent: order.partnerPercent ? parseFloat(order.partnerPercent) : null,
-      // Преобразуем пути в полные URL для документов
-      bsoDoc: order.bsoDoc ? order.bsoDoc.map(path => path.startsWith('http') ? path : `${s3BaseUrl}/${path}`) : [],
-      expenditureDoc: order.expenditureDoc ? order.expenditureDoc.map(path => path.startsWith('http') ? path : `${s3BaseUrl}/${path}`) : [],
-    }));
+      if (search) {
+        const searchAsNumber = parseInt(search, 10);
+        if (!isNaN(searchAsNumber) && searchAsNumber > 0 && searchAsNumber < 1000000) {
+          whereConditions.push(`(o.phone ILIKE $${p} OR o.client_name ILIKE $${p} OR o.address ILIKE $${p} OR o.id = $${p + 1})`);
+          params.push(`%${search}%`, searchAsNumber);
+          p += 2;
+        } else {
+          whereConditions.push(`(o.phone ILIKE $${p} OR o.client_name ILIKE $${p} OR o.address ILIKE $${p})`);
+          params.push(`%${search}%`);
+          p++;
+        }
+      }
 
-    const total = Number(totalResult[0].count);
+      if (searchId) {
+        const idAsNumber = parseInt(searchId, 10);
+        if (!isNaN(idAsNumber) && idAsNumber > 0) {
+          whereConditions.push(`o.id = $${p++}`);
+          params.push(idAsNumber);
+        }
+      }
 
-    const duration = Date.now() - startTime;
-    this.logger.debug(`[getOrders] COMPLETE in ${duration}ms (returned ${transformedOrders.length} orders, total=${total})`);
-    
-    if (duration > 2000) {
-      this.logger.warn(`[getOrders] SLOW QUERY: ${duration}ms - page=${page}, filters=${JSON.stringify({ status, city, masterId, rk, typeEquipment })}`);
-    }
+      if (searchPhone) {
+        whereConditions.push(`o.phone ILIKE $${p++}`);
+        params.push(`%${searchPhone}%`);
+      }
 
-    return {
-      success: true,
-      data: {
-        orders: transformedOrders,
-        pagination: {
-          page: +page,
-          limit: +limit,
-          total,
-          totalPages: Math.ceil(total / limit),
-        },
-      },
-    };
-    } catch (error) {
+      if (searchAddress) {
+        whereConditions.push(`o.address ILIKE $${p++}`);
+        params.push(`%${searchAddress}%`);
+      }
+
+      const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+
+      const ordersQuery = `
+        SELECT
+          o.id,
+          o.city_id         AS "cityId",
+          c.name            AS "cityName",
+          o.rk_id           AS "rkId",
+          rkt.name          AS "rkName",
+          o.phone,
+          o.order_type_id   AS "orderTypeId",
+          ot.name           AS "orderTypeName",
+          o.client_name     AS "clientName",
+          o.address,
+          o.date_meeting    AS "dateMeeting",
+          o.equipment_type_id AS "equipmentTypeId",
+          et.name           AS "equipmentTypeName",
+          o.problem,
+          o.status_id       AS "statusId",
+          os.name           AS "statusName",
+          os.code           AS "statusCode",
+          os.color          AS "statusColor",
+          o.operator_id     AS "operatorId",
+          o.master_id       AS "masterId",
+          o.result,
+          o.expenditure,
+          o.clean,
+          o.master_change   AS "masterChange",
+          o.prepayment,
+          o.call_id         AS "callId",
+          o.appeal_id       AS "appealId",
+          o.date_close_mod  AS "dateCloseMod",
+          o.closing_at      AS "closingAt",
+          o.has_poverka     AS "hasPoverka",
+          o.created_at      AS "createdAt",
+          o.updated_at      AS "updatedAt",
+          json_build_object('id', op.id, 'name', op.name, 'login', op.login) AS operator,
+          CASE WHEN m.id IS NOT NULL
+            THEN json_build_object('id', m.id, 'name', m.name)
+            ELSE NULL
+          END AS master,
+          COALESCE(
+            (SELECT json_agg(json_build_object(
+              'id', d.id, 'type', d.type, 'url', d.url, 'createdAt', d.created_at
+            ) ORDER BY d.created_at ASC)
+             FROM orders_service.order_documents d WHERE d.order_id = o.id),
+            '[]'::json
+          ) AS documents,
+          COALESCE(
+            (SELECT json_build_object(
+              'status', cs.status, 'amount', cs.amount,
+              'submittedAt', cs.submitted_at, 'approvedAt', cs.approved_at
+            )
+             FROM orders_service.cash_submissions cs WHERE cs.order_id = o.id),
+            NULL
+          ) AS "cashSubmission",
+          COALESCE(
+            (SELECT json_agg(json_build_object(
+              'id', oc.id, 'role', oc.role, 'userId', oc.user_id,
+              'text', oc.text, 'createdAt', oc.created_at
+            ) ORDER BY oc.created_at ASC)
+             FROM orders_service.order_comments oc WHERE oc.order_id = o.id),
+            '[]'::json
+          ) AS comments
+        FROM orders_service.orders o
+        JOIN references_service.order_statuses os ON os.id = o.status_id
+        JOIN references_service.cities c ON c.id = o.city_id
+        JOIN references_service.rk rkt ON rkt.id = o.rk_id
+        JOIN references_service.order_types ot ON ot.id = o.order_type_id
+        JOIN references_service.equipment_types et ON et.id = o.equipment_type_id
+        LEFT JOIN auth_service.operators op ON op.id = o.operator_id
+        LEFT JOIN auth_service.masters m ON m.id = o.master_id
+        ${whereClause}
+        ORDER BY
+          os.sort_order ASC,
+          CASE
+            WHEN os.code IN ('waiting','accepted','on_way','in_work','modern')
+            THEN o.date_meeting
+          END ASC NULLS LAST,
+          CASE
+            WHEN os.code IN ('done','rejected','no_order')
+            THEN o.closing_at
+          END DESC NULLS LAST
+        LIMIT $${p++}
+        OFFSET $${p++}
+      `;
+
+      params.push(limit, skip);
+
+      const countQuery = `
+        SELECT COUNT(*) AS count
+        FROM orders_service.orders o
+        LEFT JOIN auth_service.masters m ON m.id = o.master_id
+        ${whereClause}
+      `;
+
+      const [orders, totalResult] = await Promise.all([
+        this.prisma.$queryRawUnsafe<any[]>(ordersQuery, ...params),
+        this.prisma.$queryRawUnsafe<[{ count: bigint }]>(countQuery, ...params.slice(0, -2)),
+      ]);
+
+      const s3BaseUrl = process.env.S3_BASE_URL || 'https://s3.twcstorage.ru/f7eead03-crmfiles';
+
+      const transformedOrders = orders.map(order => ({
+        ...order,
+        result: order.result ? parseFloat(order.result) : null,
+        expenditure: order.expenditure ? parseFloat(order.expenditure) : null,
+        clean: order.clean ? parseFloat(order.clean) : null,
+        masterChange: order.masterChange ? parseFloat(order.masterChange) : null,
+        prepayment: order.prepayment ? parseFloat(order.prepayment) : null,
+        documents: (order.documents || []).map((d: any) => ({
+          ...d,
+          url: d.url?.startsWith('http') ? d.url : `${s3BaseUrl}/${d.url}`,
+        })),
+      }));
+
+      const total = Number(totalResult[0].count);
       const duration = Date.now() - startTime;
-      this.logger.error(`[getOrders] FAILED after ${duration}ms: ${error.message}`);
+      this.logger.debug(`[getOrders] COMPLETE in ${duration}ms (${transformedOrders.length} orders, total=${total})`);
+
+      if (duration > 2000) {
+        this.logger.warn(`[getOrders] SLOW QUERY: ${duration}ms`);
+      }
+
+      return {
+        success: true,
+        data: {
+          orders: transformedOrders,
+          pagination: {
+            page: +page,
+            limit: +limit,
+            total,
+            totalPages: Math.ceil(total / limit),
+          },
+        },
+      };
+    } catch (error) {
+      this.logger.error(`[getOrders] FAILED: ${error.message}`);
       throw error;
     }
   }
 
+  // ─────────────────────────────────────────
+  // CREATE ORDER
+  // ─────────────────────────────────────────
+
   async createOrder(dto: CreateOrderDto, user: AuthUser) {
-    const order = await this.prisma.order.create({
-      data: {
-        ...dto,
-        statusOrder: dto.statusOrder || 'Ожидает',
-        createDate: new Date(),
-        dateMeeting: new Date(dto.dateMeeting),
-      },
-      include: {
-        operator: true,
-        master: true,
-      },
+    await this.loadStatusCache();
+    const waitingStatusId = this.statusCodeToId.get(STATUS.WAITING);
+
+    const order = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.order.create({
+        data: {
+          cityId: dto.cityId,
+          rkId: dto.rkId,
+          phone: dto.phone,
+          orderTypeId: dto.orderTypeId,
+          clientName: dto.clientName,
+          address: dto.address,
+          dateMeeting: new Date(dto.dateMeeting),
+          equipmentTypeId: dto.equipmentTypeId,
+          problem: dto.problem,
+          statusId: waitingStatusId || 1,
+          operatorId: dto.operatorId,
+          callId: dto.callId,
+        },
+        include: {
+          city: true,
+          rk: true,
+          orderType: true,
+          equipmentType: true,
+          status: true,
+          operator: { select: { id: true, name: true, login: true } },
+          master: { select: { id: true, name: true } },
+        },
+      });
+
+      // Создаём первый комментарий если передан
+      if (dto.comment) {
+        await tx.orderComment.create({
+          data: {
+            orderId: created.id,
+            role: user.role,
+            userId: user.userId,
+            text: dto.comment,
+          },
+        });
+      }
+
+      return created;
     });
 
-    // ✅ ОПТИМИЗАЦИЯ: Fire-and-forget уведомление (не блокирует ответ)
-    // Telegram уведомление директорам
     this.fireAndForgetNotification(
       this.notificationsService.sendNewOrderNotification({
         orderId: order.id,
-        city: order.city,
+        city: order.city.name,
         clientName: order.clientName,
         phone: order.phone,
         address: order.address,
         dateMeeting: order.dateMeeting.toISOString(),
         problem: order.problem,
-        rk: order.rk,
-        avitoName: order.avitoName ?? undefined,
-        typeEquipment: order.typeEquipment,
+        rk: order.rk?.name,
+        typeEquipment: order.equipmentType?.name,
       }),
       `new-order-#${order.id}`
     );
 
-    // ✅ UI уведомление директорам города
     this.fireAndForgetNotification(
       this.notificationsService.sendUINotificationToDirectors(
-        order.city,
+        order.city.name,
         'order_new',
         order.id,
         order.clientName,
-        undefined, // masterName (нет мастера при создании)
+        undefined,
         { address: order.address, dateMeeting: order.dateMeeting.toISOString() },
       ),
       `ui-new-order-#${order.id}`
     );
 
-    // ✅ UI уведомление оператору (создателю)
-    if (order.operatorNameId) {
+    if (order.operatorId) {
       this.fireAndForgetNotification(
         this.notificationsService.sendUINotificationToOperator(
-          order.operatorNameId,
+          order.operatorId,
           'order_created',
           order.id,
           order.clientName,
@@ -426,26 +455,19 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    // ✅ FIX: Инвалидация кэша filter options при создании заказа
     this.invalidateFilterOptionsCache();
 
-    return { 
-      success: true, 
+    return {
+      success: true,
       data: order,
       message: `Заказ №${order.id} успешно создан!`
     };
   }
 
   async createOrderFromCall(dto: CreateOrderFromCallDto, user: AuthUser) {
-    // Получаем информацию о всех звонках из группы
     const calls = await this.prisma.call.findMany({
       where: { id: { in: dto.callIds } },
-      select: {
-        id: true,
-        phoneClient: true,
-        operatorId: true,
-        callId: true,
-      },
+      select: { id: true, phoneClient: true, operatorId: true, callId: true },
       orderBy: { createdAt: 'desc' },
     });
 
@@ -453,73 +475,68 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
       throw new NotFoundException('Calls not found');
     }
 
-    // Берем последний звонок как основной
     const mainCall = calls[0];
+    const allCallIds = calls.map(c => c.id).join(',');
 
-    // Собираем все ID звонков в строку через запятую (ID из таблицы calls)
-    const allCallIds = calls
-      .map(c => c.id)
-      .join(',');
+    await this.loadStatusCache();
+    const waitingStatusId = this.statusCodeToId.get(STATUS.WAITING);
 
     const order = await this.prisma.order.create({
       data: {
-        rk: dto.rk,
-        city: dto.city,
-        avitoName: dto.avitoName,
+        rkId: dto.rkId,
+        cityId: dto.cityId,
         phone: mainCall.phoneClient,
-        typeOrder: dto.typeOrder,
+        orderTypeId: dto.orderTypeId,
         clientName: dto.clientName,
         address: dto.address,
         dateMeeting: new Date(dto.dateMeeting),
-        typeEquipment: dto.typeEquipment,
+        equipmentTypeId: dto.equipmentTypeId,
         problem: dto.problem,
-        statusOrder: 'Ожидает',
-        operatorNameId: dto.operatorNameId,
+        statusId: waitingStatusId || 1,
+        operatorId: dto.operatorId,
         callId: allCallIds,
-        createDate: new Date(),
       },
       include: {
-        operator: true,
-        master: true,
+        city: true,
+        rk: true,
+        equipmentType: true,
+        status: true,
+        operator: { select: { id: true, name: true, login: true } },
+        master: { select: { id: true, name: true } },
       },
     });
 
-    // ✅ ОПТИМИЗАЦИЯ: Fire-and-forget уведомление (не блокирует ответ)
-    // Telegram уведомление директорам
     this.fireAndForgetNotification(
       this.notificationsService.sendNewOrderNotification({
         orderId: order.id,
-        city: order.city,
+        city: order.city.name,
         clientName: order.clientName,
         phone: order.phone,
         address: order.address,
         dateMeeting: order.dateMeeting.toISOString(),
         problem: order.problem,
-        rk: order.rk,
-        avitoName: order.avitoName ?? undefined,
-        typeEquipment: order.typeEquipment,
+        rk: order.rk?.name,
+        typeEquipment: order.equipmentType?.name,
       }),
       `new-order-from-call-#${order.id}`
     );
 
-    // ✅ UI уведомление директорам города
     this.fireAndForgetNotification(
       this.notificationsService.sendUINotificationToDirectors(
-        order.city,
+        order.city.name,
         'order_new',
         order.id,
         order.clientName,
-        undefined, // masterName (нет мастера при создании)
+        undefined,
         { address: order.address, dateMeeting: order.dateMeeting.toISOString() },
       ),
       `ui-new-order-from-call-#${order.id}`
     );
 
-    // ✅ UI уведомление оператору
-    if (order.operatorNameId) {
+    if (order.operatorId) {
       this.fireAndForgetNotification(
         this.notificationsService.sendUINotificationToOperator(
-          order.operatorNameId,
+          order.operatorId,
           'order_created',
           order.id,
           order.clientName,
@@ -528,78 +545,90 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    // ✅ FIX: Инвалидация кэша filter options при создании заказа
     this.invalidateFilterOptionsCache();
 
-    return { 
-      success: true, 
+    return {
+      success: true,
       data: order,
       message: `Заказ №${order.id} успешно создан!`
     };
   }
 
   async createOrderFromChat(dto: CreateOrderFromChatDto, user: AuthUser) {
-    const order = await this.prisma.order.create({
-      data: {
-        rk: dto.rk,
-        city: dto.city,
-        avitoName: dto.avitoName,
-        phone: dto.phone,
-        typeOrder: dto.typeOrder,
-        clientName: dto.clientName,
-        address: dto.address,
-        dateMeeting: new Date(dto.dateMeeting),
-        typeEquipment: dto.typeEquipment,
-        problem: dto.problem,
-        callRecord: dto.callRecord,
-        statusOrder: dto.statusOrder || 'Ожидает',
-        operatorNameId: dto.operatorNameId,
-        avitoChatId: dto.avitoChatId,
-        comment: dto.comment,
-        createDate: new Date(),
-      },
-      include: {
-        operator: true,
-        master: true,
-      },
+    await this.loadStatusCache();
+    const waitingStatusId = this.statusCodeToId.get(STATUS.WAITING);
+
+    const order = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.order.create({
+        data: {
+          rkId: dto.rkId,
+          cityId: dto.cityId,
+          phone: dto.phone,
+          orderTypeId: dto.orderTypeId,
+          clientName: dto.clientName,
+          address: dto.address,
+          dateMeeting: new Date(dto.dateMeeting),
+          equipmentTypeId: dto.equipmentTypeId,
+          problem: dto.problem,
+          statusId: waitingStatusId || 1,
+          operatorId: dto.operatorId,
+          callId: dto.callId,
+        },
+        include: {
+          city: true,
+          rk: true,
+          equipmentType: true,
+          status: true,
+          operator: { select: { id: true, name: true, login: true } },
+          master: { select: { id: true, name: true } },
+        },
+      });
+
+      if (dto.comment) {
+        await tx.orderComment.create({
+          data: {
+            orderId: created.id,
+            role: user.role,
+            userId: user.userId,
+            text: dto.comment,
+          },
+        });
+      }
+
+      return created;
     });
 
-    // ✅ ОПТИМИЗАЦИЯ: Fire-and-forget уведомление (не блокирует ответ)
-    // Telegram уведомление директорам
     this.fireAndForgetNotification(
       this.notificationsService.sendNewOrderNotification({
         orderId: order.id,
-        city: order.city,
+        city: order.city.name,
         clientName: order.clientName,
         phone: order.phone,
         address: order.address,
         dateMeeting: order.dateMeeting.toISOString(),
         problem: order.problem,
-        rk: order.rk,
-        avitoName: order.avitoName ?? undefined,
-        typeEquipment: order.typeEquipment,
+        rk: order.rk?.name,
+        typeEquipment: order.equipmentType?.name,
       }),
       `new-order-from-chat-#${order.id}`
     );
 
-    // ✅ UI уведомление директорам города
     this.fireAndForgetNotification(
       this.notificationsService.sendUINotificationToDirectors(
-        order.city,
+        order.city.name,
         'order_new',
         order.id,
         order.clientName,
-        undefined, // masterName (нет мастера при создании)
+        undefined,
         { address: order.address, dateMeeting: order.dateMeeting.toISOString() },
       ),
       `ui-new-order-from-chat-#${order.id}`
     );
 
-    // ✅ UI уведомление оператору
-    if (order.operatorNameId) {
+    if (order.operatorId) {
       this.fireAndForgetNotification(
         this.notificationsService.sendUINotificationToOperator(
-          order.operatorNameId,
+          order.operatorId,
           'order_created',
           order.id,
           order.clientName,
@@ -608,169 +637,203 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    // ✅ FIX: Инвалидация кэша filter options при создании заказа
     this.invalidateFilterOptionsCache();
 
-    return { 
-      success: true, 
+    return {
+      success: true,
       data: order,
       message: `Заказ №${order.id} успешно создан!`
     };
   }
 
+  // ─────────────────────────────────────────
+  // GET SINGLE ORDER
+  // ─────────────────────────────────────────
+
   async getOrder(id: number, user: AuthUser) {
     const order = await this.prisma.order.findUnique({
       where: { id },
       include: {
-        operator: true,
-        master: true,
+        city: true,
+        rk: true,
+        orderType: true,
+        equipmentType: true,
+        status: true,
+        operator: { select: { id: true, name: true, login: true } },
+        master: { select: { id: true, name: true } },
+        documents: true,
+        comments: { orderBy: { createdAt: 'asc' } },
+        cashSubmission: true,
+        poverkas: true,
       },
     });
 
-    if (!order) {
-      throw new NotFoundException('Order not found');
-    }
+    if (!order) throw new NotFoundException('Order not found');
 
-    // RBAC проверка
     if (user.role === 'master' && order.masterId !== user.userId) {
       throw new ForbiddenException('Access denied');
     }
 
-    // ✅ FIX: RBAC проверка для директора
-    if (user.role === 'director' && user.cities && !user.cities.includes(order.city)) {
+    if (user.role === 'director' && user.cityIds && !user.cityIds.includes(order.cityId)) {
       throw new ForbiddenException('Order is not in your cities');
     }
 
-    // S3 base URL для преобразования путей в полные URL
     const s3BaseUrl = process.env.S3_BASE_URL || 'https://s3.twcstorage.ru/f7eead03-crmfiles';
-    
-    // Преобразуем пути к файлам в полные URL
-    const transformedOrder = {
-      ...order,
-      bsoDoc: order.bsoDoc ? order.bsoDoc.map(path => path.startsWith('http') ? path : `${s3BaseUrl}/${path}`) : [],
-      expenditureDoc: order.expenditureDoc ? order.expenditureDoc.map(path => path.startsWith('http') ? path : `${s3BaseUrl}/${path}`) : [],
-    };
 
-    return { success: true, data: transformedOrder };
+    return {
+      success: true,
+      data: {
+        ...order,
+        documents: order.documents.map(d => ({
+          ...d,
+          url: d.url.startsWith('http') ? d.url : `${s3BaseUrl}/${d.url}`,
+        })),
+      },
+    };
   }
 
-  // ✅ FIX: Обернуто в транзакцию для предотвращения race condition
+  // ─────────────────────────────────────────
+  // UPDATE ORDER
+  // ─────────────────────────────────────────
+
   async updateOrder(
-    id: number, 
-    dto: UpdateOrderDto, 
-    user: AuthUser, 
+    id: number,
+    dto: UpdateOrderDto,
+    user: AuthUser,
     headers?: Record<string, string | string[] | undefined>
   ) {
     this.logger.debug(`Updating order #${id}, fields: ${getFieldNames(dto).join(', ')}`);
-    
-    // ✅ FIX: Используем транзакцию для атомарности операций
+
     const result = await this.prisma.$transaction(async (tx) => {
-      // Блокируем запись для обновления (SELECT FOR UPDATE через findFirst)
-      const order = await tx.order.findUnique({ 
+      const order = await tx.order.findUnique({
         where: { id },
+        include: { status: true, city: true },
       });
-      
+
       if (!order) throw new NotFoundException('Order not found');
 
-      // RBAC проверка
       if (user.role === 'master' && order.masterId !== user.userId) {
         throw new ForbiddenException('Access denied');
       }
 
-      // Создаем объект обновления
       const updateData: any = {};
-      
-      // Флаг для отслеживания смены города (для обнуления masterId)
       let cityChanged = false;
       let oldMasterIdBeforeCityChange: number | null = null;
-      
-      // Основные поля заказа
-      if (dto.rk !== undefined && dto.rk !== null) updateData.rk = dto.rk;
-      
-      // Обработка изменения города
-      if (dto.city !== undefined && dto.city !== null && dto.city !== order.city) {
-        updateData.city = dto.city;
+
+      if (dto.rkId !== undefined) updateData.rkId = dto.rkId;
+
+      if (dto.cityId !== undefined && dto.cityId !== order.cityId) {
+        updateData.cityId = dto.cityId;
         cityChanged = true;
-        
-        // Если был назначен мастер - снимаем его
         if (order.masterId) {
           oldMasterIdBeforeCityChange = order.masterId;
           updateData.masterId = null;
-          this.logger.log(`City changed from ${order.city} to ${dto.city}, removing master #${order.masterId} from order #${id}`);
+          this.logger.log(`City changed, removing master #${order.masterId} from order #${id}`);
         }
-      } else if (dto.city !== undefined && dto.city !== null) {
-        updateData.city = dto.city;
+      } else if (dto.cityId !== undefined) {
+        updateData.cityId = dto.cityId;
       }
-      if (dto.avitoName !== undefined && dto.avitoName !== null) updateData.avitoName = dto.avitoName;
-      if (dto.phone !== undefined && dto.phone !== null) updateData.phone = dto.phone;
-      if (dto.typeOrder !== undefined && dto.typeOrder !== null) updateData.typeOrder = dto.typeOrder;
-      if (dto.clientName !== undefined && dto.clientName !== null) updateData.clientName = dto.clientName;
-      if (dto.address !== undefined && dto.address !== null) updateData.address = dto.address;
-      if (dto.typeEquipment !== undefined && dto.typeEquipment !== null) updateData.typeEquipment = dto.typeEquipment;
-      if (dto.problem !== undefined && dto.problem !== null) updateData.problem = dto.problem;
-      if (dto.avitoChatId !== undefined && dto.avitoChatId !== null) updateData.avitoChatId = dto.avitoChatId;
-      if (dto.callId !== undefined && dto.callId !== null) updateData.callId = dto.callId;
-      if (dto.operatorNameId !== undefined && dto.operatorNameId !== null) updateData.operatorNameId = dto.operatorNameId;
-      
-      // Поля статуса и мастера
-      if (dto.statusOrder !== undefined && dto.statusOrder !== null) {
-        updateData.statusOrder = dto.statusOrder;
-        const terminalStatuses = ['Готово', 'Отказ', 'Незаказ'];
-        if (terminalStatuses.includes(dto.statusOrder) && dto.closingData === undefined) {
-          updateData.closingData = new Date();
-        }
+
+      if (dto.phone !== undefined) updateData.phone = dto.phone;
+      if (dto.orderTypeId !== undefined) updateData.orderTypeId = dto.orderTypeId;
+      if (dto.clientName !== undefined) updateData.clientName = dto.clientName;
+      if (dto.address !== undefined) updateData.address = dto.address;
+      if (dto.equipmentTypeId !== undefined) updateData.equipmentTypeId = dto.equipmentTypeId;
+      if (dto.problem !== undefined) updateData.problem = dto.problem;
+      if (dto.callId !== undefined) updateData.callId = dto.callId;
+      if (dto.operatorId !== undefined) updateData.operatorId = dto.operatorId;
+
+      if (dto.statusId !== undefined) {
+        updateData.statusId = dto.statusId;
       }
+
       if (dto.masterId !== undefined) {
         updateData.masterId = dto.masterId;
       }
-      
+
       // Финансовые поля
-      if (dto.result !== undefined && dto.result !== null) updateData.result = dto.result;
-      if (dto.expenditure !== undefined && dto.expenditure !== null) updateData.expenditure = dto.expenditure;
-      
-      // ✅ FIX: Вычисляем clean server-side для предотвращения манипуляций
-      if ((dto.result !== undefined && dto.result !== null) || (dto.expenditure !== undefined && dto.expenditure !== null)) {
-        const finalResult = dto.result !== undefined ? dto.result : (updateData.result || 0);
-        const finalExpenditure = dto.expenditure !== undefined ? dto.expenditure : (updateData.expenditure || 0);
+      if (dto.result !== undefined) updateData.result = dto.result;
+      if (dto.expenditure !== undefined) updateData.expenditure = dto.expenditure;
+
+      if (dto.result !== undefined || dto.expenditure !== undefined) {
+        const finalResult = dto.result !== undefined ? dto.result : (Number(order.result) || 0);
+        const finalExpenditure = dto.expenditure !== undefined ? dto.expenditure : (Number(order.expenditure) || 0);
         updateData.clean = finalResult - finalExpenditure;
-      } else if (dto.clean !== undefined && dto.clean !== null) {
-        // Если только clean передан - логируем предупреждение
+      } else if (dto.clean !== undefined) {
         this.logger.warn(`Manual clean value provided: ${dto.clean} for order update`);
         updateData.clean = dto.clean;
       }
-      
-      if (dto.masterChange !== undefined && dto.masterChange !== null) updateData.masterChange = dto.masterChange;
-      if (dto.prepayment !== undefined && dto.prepayment !== null) updateData.prepayment = dto.prepayment;
-      
-      // Документы
-      if (dto.bsoDoc !== undefined) updateData.bsoDoc = dto.bsoDoc;
-      if (dto.expenditureDoc !== undefined) updateData.expenditureDoc = dto.expenditureDoc;
-      if (dto.cashReceiptDoc !== undefined) updateData.cashReceiptDoc = dto.cashReceiptDoc;
-      
-      // Дополнительные поля
-      if (dto.comment !== undefined && dto.comment !== null) updateData.comment = dto.comment;
-      if (dto.cashSubmissionStatus !== undefined && dto.cashSubmissionStatus !== null) updateData.cashSubmissionStatus = dto.cashSubmissionStatus;
-      if (dto.cashSubmissionAmount !== undefined && dto.cashSubmissionAmount !== null) updateData.cashSubmissionAmount = dto.cashSubmissionAmount;
-      
-      // Поля партнера
-      if (dto.partner !== undefined) updateData.partner = dto.partner;
-      if (dto.partnerPercent !== undefined && dto.partnerPercent !== null) updateData.partnerPercent = dto.partnerPercent;
-      
+
+      if (dto.masterChange !== undefined) updateData.masterChange = dto.masterChange;
+      if (dto.prepayment !== undefined) updateData.prepayment = dto.prepayment;
+
+      // Документы через OrderDocument
+      if (dto.bsoDoc !== undefined) {
+        await tx.orderDocument.deleteMany({ where: { orderId: id, type: 'bso' } });
+        if (dto.bsoDoc && dto.bsoDoc.length > 0) {
+          await tx.orderDocument.createMany({
+            data: dto.bsoDoc.map(url => ({ orderId: id, type: 'bso', url })),
+          });
+        }
+      }
+      if (dto.expenditureDoc !== undefined) {
+        await tx.orderDocument.deleteMany({ where: { orderId: id, type: 'expenditure' } });
+        if (dto.expenditureDoc && dto.expenditureDoc.length > 0) {
+          await tx.orderDocument.createMany({
+            data: dto.expenditureDoc.map(url => ({ orderId: id, type: 'expenditure', url })),
+          });
+        }
+      }
+      if (dto.cashReceiptDoc !== undefined) {
+        await tx.orderDocument.deleteMany({ where: { orderId: id, type: 'cash_receipt' } });
+        if (dto.cashReceiptDoc) {
+          await tx.orderDocument.create({ data: { orderId: id, type: 'cash_receipt', url: dto.cashReceiptDoc } });
+        }
+      }
+
+      // Комментарий → создать новый
+      if (dto.comment !== undefined && dto.comment !== null) {
+        await tx.orderComment.create({
+          data: { orderId: id, role: user.role, userId: user.userId, text: dto.comment },
+        });
+      }
+
+      // Статус подачи кассы
+      if (dto.cashSubmissionStatus !== undefined || dto.cashSubmissionAmount !== undefined) {
+        const existingCs = await tx.cashSubmission.findUnique({ where: { orderId: id } });
+        if (existingCs) {
+          await tx.cashSubmission.update({
+            where: { orderId: id },
+            data: {
+              ...(dto.cashSubmissionStatus !== undefined ? { status: dto.cashSubmissionStatus } : {}),
+              ...(dto.cashSubmissionAmount !== undefined ? { amount: dto.cashSubmissionAmount } : {}),
+            },
+          });
+        }
+      }
+
       // Даты
-      if (dto.dateMeeting !== undefined && dto.dateMeeting !== null) {
-        updateData.dateMeeting = dto.dateMeeting ? new Date(dto.dateMeeting) : null;
-      }
-      if (dto.closingData !== undefined && dto.closingData !== null) {
-        updateData.closingData = dto.closingData ? new Date(dto.closingData) : null;
-      }
-      if (dto.dateClosmod !== undefined && dto.dateClosmod !== null) {
-        updateData.dateClosmod = dto.dateClosmod ? new Date(dto.dateClosmod) : null;
+      if (dto.dateMeeting !== undefined) updateData.dateMeeting = new Date(dto.dateMeeting);
+      if (dto.closingAt !== undefined) updateData.closingAt = dto.closingAt ? new Date(dto.closingAt) : null;
+      if (dto.dateCloseMod !== undefined) updateData.dateCloseMod = dto.dateCloseMod ? new Date(dto.dateCloseMod) : null;
+
+      // Автоматически ставим дату закрытия при переходе в терминальный статус
+      if (dto.statusId !== undefined && dto.closingAt === undefined) {
+        await this.loadStatusCache();
+        const newCode = this.statusIdToCode.get(dto.statusId);
+        if (newCode && TERMINAL_STATUS_CODES.includes(newCode as any)) {
+          updateData.closingAt = new Date();
+        }
       }
 
       const updated = await tx.order.update({
         where: { id },
         data: updateData,
         include: {
+          city: true,
+          rk: true,
+          equipmentType: true,
+          status: true,
           operator: { select: { id: true, name: true, login: true } },
           master: { select: { id: true, name: true } },
         },
@@ -778,89 +841,83 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
 
       this.logger.log(`Order #${updated.id} updated successfully`);
 
-      // ✅ FIX: Проверяем нужен ли sync ПОСЛЕ транзакции (не внутри!)
-      const needsCashSync = dto.statusOrder === 'Готово' && updated.masterChange && Number(updated.masterChange) > 0;
+      const needsCashSync = updated.status.code === STATUS.DONE
+        && updated.masterChange
+        && Number(updated.masterChange) > 0;
 
       return { order, updated, cityChanged, oldMasterIdBeforeCityChange, needsCashSync };
-    }, {
-      timeout: 15000, // 15 секунд на БД-операции (без HTTP-вызовов)
-      isolationLevel: 'ReadCommitted', // Стандартный уровень изоляции
-    });
+    }, { timeout: 15000, isolationLevel: 'ReadCommitted' });
 
     const { order, updated, cityChanged, oldMasterIdBeforeCityChange, needsCashSync } = result;
 
-    // ✅ FIX: Cash-service вызов ПОСЛЕ транзакции БД (не блокирует БД лок)
-    // НО синхронно — если касса недоступна, возвращаем ошибку клиенту
     if (needsCashSync) {
-      this.logger.log(`Order #${updated.id} completed, syncing cash receipt (masterChange=${updated.masterChange})`);
+      this.logger.log(`Order #${updated.id} completed, syncing cash (masterChange=${updated.masterChange})`);
       try {
         await this.syncCashReceipt(updated, user, headers);
       } catch (err) {
         this.logger.error(`Failed to sync cash for order #${updated.id}: ${err.message}`);
-        // Откатываем статус заказа, так как касса не синхронизирована
+        // Откатываем статус
         await this.prisma.order.update({
           where: { id: updated.id },
-          data: { 
-            statusOrder: order.statusOrder, // Возвращаем старый статус
-            closingData: order.closingData,  // Возвращаем старую дату закрытия
-          }
+          data: { statusId: order.statusId, closingAt: order.closingAt },
         });
         throw new Error(`Заказ не может быть закрыт: сервис кассы недоступен. Попробуйте позже.`);
       }
     }
-    
-    // ✅ FIX: Уведомления отправляются ПОСЛЕ успешного коммита транзакции
+
     this.sendUpdateNotifications(order, updated, dto, { cityChanged, oldMasterIdBeforeCityChange });
-    
-    // ✅ FIX N+1: Возвращаем oldOrder для контроллера (чтобы не делать дополнительный запрос)
-    return { 
-      success: true, 
+
+    return {
+      success: true,
       data: updated,
-      oldOrder: order, // ✅ Для аудит-лога в контроллере
+      oldOrder: order,
       message: `Заказ №${updated.id} обновлен!`
     };
   }
 
-  /**
-   * ✅ FIX: Выделенный метод для отправки уведомлений (вызывается после транзакции)
-   */
+  // ─────────────────────────────────────────
+  // NOTIFICATIONS AFTER UPDATE
+  // ─────────────────────────────────────────
+
   private sendUpdateNotifications(
-    order: any, 
-    updated: any, 
+    order: any,
+    updated: any,
     dto: UpdateOrderDto,
     extra?: { cityChanged?: boolean; oldMasterIdBeforeCityChange?: number | null }
   ) {
+    const oldCode = order.status?.code;
+    const newCode = updated.status?.code;
+    const cityName = updated.city?.name;
+
     // 0. Изменение города
-    if (extra?.cityChanged && dto.city && order.city !== dto.city) {
+    if (extra?.cityChanged && dto.cityId && order.cityId !== dto.cityId) {
       this.fireAndForgetNotification(
         this.notificationsService.sendCityChangeNotification({
           orderId: updated.id,
-          oldCity: order.city,
-          newCity: updated.city,
+          oldCity: order.city?.name || String(order.cityId),
+          newCity: cityName,
           clientName: updated.clientName?.trim() || undefined,
           masterId: extra.oldMasterIdBeforeCityChange || undefined,
-          rk: updated.rk?.trim() || undefined,
-          avitoName: updated.avitoName?.trim() || undefined,
-          typeEquipment: updated.typeEquipment?.trim() || undefined,
+          rk: updated.rk?.name?.trim() || undefined,
+          typeEquipment: updated.equipmentType?.name?.trim() || undefined,
           dateMeeting: updated.dateMeeting?.toISOString(),
         }),
         `city-change-#${updated.id}`
       );
     }
 
-    // 0.1. Изменение адреса (только если город не менялся, иначе адрес уже учтён)
+    // 0.1. Изменение адреса
     if (dto.address && order.address !== dto.address && !extra?.cityChanged) {
       this.fireAndForgetNotification(
         this.notificationsService.sendAddressChangeNotification({
           orderId: updated.id,
-          city: updated.city,
+          city: cityName,
           oldAddress: order.address || 'Не указан',
           newAddress: updated.address,
           clientName: updated.clientName?.trim() || undefined,
           masterId: updated.masterId || undefined,
-          rk: updated.rk?.trim() || undefined,
-          avitoName: updated.avitoName?.trim() || undefined,
-          typeEquipment: updated.typeEquipment?.trim() || undefined,
+          rk: updated.rk?.name?.trim() || undefined,
+          typeEquipment: updated.equipmentType?.name?.trim() || undefined,
           dateMeeting: updated.dateMeeting?.toISOString(),
         }),
         `address-change-#${updated.id}`
@@ -872,53 +929,46 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
       this.fireAndForgetNotification(
         this.notificationsService.sendDateChangeNotification({
           orderId: updated.id,
-          city: updated.city,
+          city: cityName,
           clientName: updated.clientName?.trim() || undefined,
           newDate: updated.dateMeeting?.toISOString(),
           oldDate: order.dateMeeting?.toISOString(),
           masterId: updated.masterId || undefined,
-          rk: updated.rk?.trim() || undefined,
-          avitoName: updated.avitoName?.trim() || undefined,
-          typeEquipment: updated.typeEquipment?.trim() || undefined,
+          rk: updated.rk?.name?.trim() || undefined,
+          typeEquipment: updated.equipmentType?.name?.trim() || undefined,
         }),
         `date-change-#${updated.id}`
       );
     }
 
     // 2. Принятие заказа мастером
-    if (dto.statusOrder === 'Принял' && order.statusOrder !== 'Принял') {
+    if (newCode === STATUS.ACCEPTED && oldCode !== STATUS.ACCEPTED) {
       this.fireAndForgetNotification(
         this.notificationsService.sendOrderAcceptedNotification({
           orderId: updated.id,
           masterId: updated.masterId || undefined,
-          rk: updated.rk?.trim() || undefined,
-          avitoName: updated.avitoName?.trim() || undefined,
-          typeEquipment: updated.typeEquipment?.trim() || undefined,
+          rk: updated.rk?.name?.trim() || undefined,
+          typeEquipment: updated.equipmentType?.name?.trim() || undefined,
           clientName: updated.clientName?.trim() || undefined,
           dateMeeting: updated.dateMeeting?.toISOString(),
         }),
         `order-accepted-#${updated.id}`
       );
-      
-      // ✅ UI уведомление директорам
       this.fireAndForgetNotification(
         this.notificationsService.sendUINotificationToDirectors(
-          updated.city,
+          cityName,
           'order_accepted',
           updated.id,
           updated.clientName,
           updated.master?.name,
-          {
-            address: updated.address,
-            dateMeeting: updated.dateMeeting?.toISOString(),
-          },
+          { address: updated.address, dateMeeting: updated.dateMeeting?.toISOString() },
         ),
         `ui-order-accepted-#${updated.id}`
       );
     }
 
     // 3. Закрытие заказа
-    if (dto.statusOrder === 'Готово' && order.statusOrder !== 'Готово') {
+    if (newCode === STATUS.DONE && oldCode !== STATUS.DONE) {
       this.fireAndForgetNotification(
         this.notificationsService.sendOrderClosedNotification({
           orderId: updated.id,
@@ -932,99 +982,68 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
         }),
         `order-closed-#${updated.id}`
       );
-      
-      // ✅ UI уведомление директорам
       this.fireAndForgetNotification(
         this.notificationsService.sendUINotificationToDirectors(
-          updated.city,
+          cityName,
           'order_closed',
           updated.id,
           updated.clientName,
           updated.master?.name,
-          {
-            total: updated.result?.toString(),
-            expense: updated.expenditure?.toString(),
-            net: updated.clean?.toString(),
-            handover: updated.masterChange?.toString(),
-          },
+          { total: updated.result?.toString(), expense: updated.expenditure?.toString(), net: updated.clean?.toString(), handover: updated.masterChange?.toString() },
         ),
         `ui-order-closed-#${updated.id}`
       );
     }
 
     // 4. Модерн
-    if (dto.statusOrder === 'Модерн' && order.statusOrder !== 'Модерн') {
+    if (newCode === STATUS.MODERN && oldCode !== STATUS.MODERN) {
       this.fireAndForgetNotification(
         this.notificationsService.sendOrderInModernNotification({
           orderId: updated.id,
           masterId: updated.masterId || undefined,
-          rk: updated.rk?.trim() || undefined,
-          avitoName: updated.avitoName?.trim() || undefined,
-          typeEquipment: updated.typeEquipment?.trim() || undefined,
+          rk: updated.rk?.name?.trim() || undefined,
+          typeEquipment: updated.equipmentType?.name?.trim() || undefined,
           clientName: updated.clientName?.trim() || undefined,
           dateMeeting: updated.dateMeeting?.toISOString(),
           prepayment: updated.prepayment?.toString(),
-          expectedClosingDate: updated.dateClosmod?.toISOString(),
-          comment: updated.comment?.trim() || undefined,
+          expectedClosingDate: updated.dateCloseMod?.toISOString(),
         }),
         `order-modern-#${updated.id}`
       );
-
-      // ✅ UI уведомление директорам
       this.fireAndForgetNotification(
         this.notificationsService.sendUINotificationToDirectors(
-          updated.city,
-          'order_modern',
-          updated.id,
-          updated.clientName,
-          updated.master?.name,
-          {
-            address: updated.address,
-            dateMeeting: updated.dateMeeting?.toISOString(),
-          },
+          cityName, 'order_modern', updated.id, updated.clientName, updated.master?.name,
+          { address: updated.address, dateMeeting: updated.dateMeeting?.toISOString() },
         ),
         `ui-order-modern-#${updated.id}`
       );
     }
 
     // 5. Отказ
-    if (dto.statusOrder === 'Отказ' && order.statusOrder !== 'Отказ') {
+    if (newCode === STATUS.REJECTED && oldCode !== STATUS.REJECTED) {
       this.fireAndForgetNotification(
         this.notificationsService.sendOrderRejectionNotification({
           orderId: updated.id,
-          city: updated.city,
+          city: cityName,
           clientName: updated.clientName,
           phone: updated.phone,
-          reason: dto.statusOrder!,
+          reason: updated.status?.name || STATUS.REJECTED,
           masterId: updated.masterId || undefined,
         }),
         `order-refusal-#${updated.id}`
       );
-      
-      // ✅ UI уведомление директорам
       this.fireAndForgetNotification(
         this.notificationsService.sendUINotificationToDirectors(
-          updated.city,
-          'order_refusal',
-          updated.id,
-          updated.clientName,
-          updated.master?.name,
-          {
-            address: updated.address,
-            dateMeeting: updated.dateMeeting?.toISOString(),
-          },
+          cityName, 'order_refusal', updated.id, updated.clientName, updated.master?.name,
+          { address: updated.address, dateMeeting: updated.dateMeeting?.toISOString() },
         ),
         `ui-order-refusal-#${updated.id}`
       );
-      
-      // ✅ UI уведомление мастеру (если назначен)
       if (updated.masterId) {
         this.fireAndForgetNotification(
           this.notificationsService.sendUINotificationToMaster(
-            updated.masterId,
-            'master_order_rejected',
-            updated.id,
-            { clientName: updated.clientName, reason: dto.statusOrder },
+            updated.masterId, 'master_order_rejected', updated.id,
+            { clientName: updated.clientName, reason: updated.status?.name },
           ),
           `ui-master-refusal-#${updated.id}`
         );
@@ -1032,43 +1051,30 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
     }
 
     // 6. Незаказ
-    if (dto.statusOrder === 'Незаказ' && order.statusOrder !== 'Незаказ') {
+    if (newCode === STATUS.NO_ORDER && oldCode !== STATUS.NO_ORDER) {
       this.fireAndForgetNotification(
         this.notificationsService.sendOrderRejectionNotification({
           orderId: updated.id,
-          city: updated.city,
+          city: cityName,
           clientName: updated.clientName,
           phone: updated.phone,
-          reason: dto.statusOrder!,
+          reason: updated.status?.name || STATUS.NO_ORDER,
           masterId: updated.masterId || undefined,
         }),
         `order-noorder-#${updated.id}`
       );
-      
-      // ✅ UI уведомление директорам
       this.fireAndForgetNotification(
         this.notificationsService.sendUINotificationToDirectors(
-          updated.city,
-          'order_rejected',
-          updated.id,
-          updated.clientName,
-          undefined, // masterName
-          {
-            address: updated.address,
-            dateMeeting: updated.dateMeeting?.toISOString(),
-          },
+          cityName, 'order_rejected', updated.id, updated.clientName, undefined,
+          { address: updated.address, dateMeeting: updated.dateMeeting?.toISOString() },
         ),
         `ui-order-rejected-#${updated.id}`
       );
-      
-      // ✅ UI уведомление мастеру (если назначен)
       if (updated.masterId) {
         this.fireAndForgetNotification(
           this.notificationsService.sendUINotificationToMaster(
-            updated.masterId,
-            'master_order_rejected',
-            updated.id,
-            { clientName: updated.clientName, reason: dto.statusOrder },
+            updated.masterId, 'master_order_rejected', updated.id,
+            { clientName: updated.clientName, reason: updated.status?.name },
           ),
           `ui-master-noorder-#${updated.id}`
         );
@@ -1077,76 +1083,50 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
 
     // 7. Изменение мастера
     if (dto.masterId !== undefined && order.masterId !== dto.masterId) {
-      // Мастер отказался
       if (order.masterId && dto.masterId === null) {
         this.fireAndForgetNotification(
           this.notificationsService.sendOrderRejectionNotification({
             orderId: updated.id,
-            city: updated.city,
+            city: cityName,
             clientName: updated.clientName?.trim() || undefined,
             phone: updated.phone,
             reason: 'Мастер отказался от заказа',
             masterId: order.masterId,
-            rk: updated.rk?.trim() || undefined,
-            avitoName: updated.avitoName?.trim() || undefined,
-            typeEquipment: updated.typeEquipment?.trim() || undefined,
+            rk: updated.rk?.name?.trim() || undefined,
+            typeEquipment: updated.equipmentType?.name?.trim() || undefined,
             dateMeeting: updated.dateMeeting?.toISOString(),
           }),
           `master-declined-#${updated.id}`
         );
       }
-      
-      // Передача заказа другому мастеру
       if (order.masterId && dto.masterId) {
         this.fireAndForgetNotification(
-          this.notificationsService.sendMasterReassignedNotification({
-            orderId: updated.id,
-            oldMasterId: order.masterId,
-          }),
+          this.notificationsService.sendMasterReassignedNotification({ orderId: updated.id, oldMasterId: order.masterId }),
           `master-reassigned-#${updated.id}`
         );
-        
-        // ✅ UI + Push уведомление СТАРОМУ мастеру
         this.fireAndForgetNotification(
           this.notificationsService.sendUINotificationToMaster(
-            order.masterId, // старый мастер
-            'master_order_reassigned',
-            updated.id,
-            { clientName: updated.clientName },
+            order.masterId, 'master_order_reassigned', updated.id, { clientName: updated.clientName },
           ),
           `ui-master-reassigned-#${updated.id}`
         );
       }
-      
-      // Назначение мастера
       if (dto.masterId) {
         this.fireAndForgetNotification(
           this.notificationsService.sendMasterAssignedNotification({
-            orderId: updated.id,
-            masterId: dto.masterId,
-            rk: updated.rk?.trim() || undefined,
-            avitoName: updated.avitoName?.trim() || undefined,
-            typeEquipment: updated.typeEquipment?.trim() || undefined,
+            orderId: updated.id, masterId: dto.masterId,
+            rk: updated.rk?.name?.trim() || undefined,
+            typeEquipment: updated.equipmentType?.name?.trim() || undefined,
             clientName: updated.clientName?.trim() || undefined,
             address: updated.address?.trim() || undefined,
             dateMeeting: updated.dateMeeting?.toISOString(),
           }),
           `master-assigned-#${updated.id}`
         );
-        
-        // ✅ UI уведомление мастеру
-        this.logger.debug(`[Orders] Sending master notification: masterId=${dto.masterId}, orderId=${updated.id}, city=${updated.city}, address=${updated.address}`);
         this.fireAndForgetNotification(
           this.notificationsService.sendUINotificationToMaster(
-            dto.masterId,
-            'master_assigned',
-            updated.id,
-            {
-              clientName: updated.clientName,
-              address: updated.address,
-              city: updated.city,
-              dateMeeting: updated.dateMeeting?.toISOString(),
-            },
+            dto.masterId, 'master_assigned', updated.id,
+            { clientName: updated.clientName, address: updated.address, city: cityName, dateMeeting: updated.dateMeeting?.toISOString() },
           ),
           `ui-master-assigned-#${updated.id}`
         );
@@ -1155,53 +1135,38 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
 
     // 8. Перенос даты
     if (dto.dateMeeting && order.dateMeeting?.toISOString() !== new Date(dto.dateMeeting).toISOString()) {
-      // UI уведомление мастеру (если назначен)
       if (updated.masterId) {
         this.fireAndForgetNotification(
           this.notificationsService.sendUINotificationToMaster(
-            updated.masterId,
-            'master_order_rescheduled',
-            updated.id,
-            {
-              clientName: updated.clientName,
-              newDate: updated.dateMeeting?.toISOString(),
-            },
+            updated.masterId, 'master_order_rescheduled', updated.id,
+            { clientName: updated.clientName, newDate: updated.dateMeeting?.toISOString() },
           ),
           `ui-master-rescheduled-#${updated.id}`
         );
       }
-      
-      // ✅ UI уведомление директорам о переносе (всегда)
       this.fireAndForgetNotification(
         this.notificationsService.sendUINotificationToDirectors(
-          updated.city,
-          'order_rescheduled',
-          updated.id,
-          updated.clientName,
-          updated.master?.name, // masterName если есть
-          {
-            address: updated.address,
-            dateMeeting: order.dateMeeting?.toISOString(),
-            newDateMeeting: updated.dateMeeting?.toISOString(),
-          },
+          cityName, 'order_rescheduled', updated.id, updated.clientName, updated.master?.name,
+          { address: updated.address, dateMeeting: order.dateMeeting?.toISOString(), newDateMeeting: updated.dateMeeting?.toISOString() },
         ),
         `ui-order-rescheduled-#${updated.id}`
       );
     }
   }
 
+  // ─────────────────────────────────────────
+  // UPDATE STATUS
+  // ─────────────────────────────────────────
+
   async updateStatus(
-    id: number, 
-    status: string, 
-    user: AuthUser, 
+    id: number,
+    statusId: number,
+    user: AuthUser,
     headers?: Record<string, string | string[] | undefined>
   ) {
-    const order = await this.prisma.order.findUnique({ 
+    const order = await this.prisma.order.findUnique({
       where: { id },
-      include: {
-        operator: true,
-        master: true
-      }
+      include: { status: true, city: true, master: { select: { id: true, name: true } }, operator: { select: { id: true, name: true, login: true } } }
     });
     if (!order) throw new NotFoundException('Order not found');
 
@@ -1209,63 +1174,54 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
       throw new ForbiddenException('Access denied');
     }
 
-    const terminalStatuses = ['Готово', 'Отказ', 'Незаказ'];
-    const data: any = { statusOrder: status };
-    if (terminalStatuses.includes(status)) {
-      data.closingData = new Date();
-    }
+    await this.loadStatusCache();
+    const newCode = this.statusIdToCode.get(statusId);
+    const isTerminal = newCode ? TERMINAL_STATUS_CODES.includes(newCode as any) : false;
 
-    const needsCashSync = status === 'Готово' && order.masterChange && Number(order.masterChange) > 0;
+    const data: any = { statusId };
+    if (isTerminal) data.closingAt = new Date();
 
-    // ✅ FIX: Транзакция только для БД-операций (без HTTP-вызовов)
+    const needsCashSync = newCode === STATUS.DONE
+      && order.masterChange
+      && Number(order.masterChange) > 0;
+
     const updated = await this.prisma.$transaction(async (tx) => {
-      // Проверяем, не был ли статус уже изменен (защита от дублирования)
       const currentOrder = await tx.order.findUnique({
         where: { id },
-        select: { statusOrder: true }
+        select: { statusId: true },
       });
-      
-      if (currentOrder?.statusOrder === status) {
+
+      if (currentOrder?.statusId === statusId) {
         throw new Error('Статус уже установлен');
       }
 
-      const result = await tx.order.update({
+      return tx.order.update({
         where: { id },
         data,
         include: {
+          city: true,
+          status: true,
           operator: { select: { id: true, name: true, login: true } },
           master: { select: { id: true, name: true } },
         },
       });
+    }, { isolationLevel: 'Serializable', timeout: 15000 });
 
-      return result;
-    }, {
-      isolationLevel: 'Serializable', // Максимальная изоляция для предотвращения race conditions
-      timeout: 15000, // 15 секунд таймаут (только БД-операции)
-    });
-
-    // ✅ FIX: Синхронизация кассы ПОСЛЕ транзакции БД (не держит лок)
-    // Но синхронно — если касса недоступна, откатываем статус
     if (needsCashSync) {
-      this.logger.log(`Order #${updated.id} status -> Готово, syncing cash (masterChange=${updated.masterChange})`);
+      this.logger.log(`Order #${updated.id} status -> done, syncing cash`);
       try {
         await this.syncCashReceipt(updated, user, headers);
       } catch (err) {
         this.logger.error(`Failed to sync cash for order #${updated.id}: ${err.message}`);
-        // Откатываем статус заказа
         await this.prisma.order.update({
           where: { id },
-          data: { 
-            statusOrder: order.statusOrder,
-            closingData: order.closingData,
-          }
+          data: { statusId: order.statusId, closingAt: order.closingAt },
         });
         throw new Error(`Сервис транзакций недоступен. Попробуйте позже.`);
       }
     }
 
-    // ✅ FIX #35: Возвращаем oldStatus для логирования без лишнего запроса в контроллере
-    return { success: true, data: updated, oldStatus: order.statusOrder };
+    return { success: true, data: updated, oldStatusId: order.statusId, oldStatusCode: order.status.code };
   }
 
   async assignMaster(id: number, masterId: number) {
@@ -1273,317 +1229,218 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
       where: { id },
       data: { masterId },
     });
-
     return { success: true, data: updated };
   }
 
-  async getOrderAvitoChat(id: number, user: AuthUser) {
-    const order = await this.prisma.order.findUnique({
-      where: { id },
-      select: {
-        id: true,
-        avitoChatId: true,
-        avitoName: true,
-        phone: true,
-        clientName: true,
-        masterId: true,
-      },
-    });
+  // ─────────────────────────────────────────
+  // SYNC CASH RECEIPT
+  // ─────────────────────────────────────────
 
-    if (!order) {
-      throw new NotFoundException('Order not found');
-    }
-
-    // RBAC проверка
-    if (user.role === 'master' && order.masterId !== user.userId) {
-      throw new ForbiddenException('Access denied');
-    }
-
-    if (!order.avitoChatId || !order.avitoName) {
-      return {
-        success: false,
-        message: 'No Avito chat data for this order',
-        data: null,
-      };
-    }
-
-    return {
-      success: true,
-      data: {
-        chatId: order.avitoChatId,
-        avitoAccountName: order.avitoName,
-        clientName: order.clientName,
-        phone: order.phone,
-      },
-    };
-  }
-
-  /**
-   * ✅ ИСПРАВЛЕНИЕ: Синхронизация записи прихода в cash-service (fire-and-forget)
-   * Создает новую запись или обновляет существующую
-   */
   private async syncCashReceipt(
-    order: any, 
-    user: AuthUser, 
+    order: any,
+    user: AuthUser,
     requestHeaders?: Record<string, string | string[] | undefined>
   ) {
     const startTime = Date.now();
     this.logger.debug(`[syncCashReceipt] START for order #${order.id}`);
-    
+
     try {
       const cashServiceUrl = process.env.CASH_SERVICE_URL || 'http://cash-service.backend.svc.cluster.local:5006';
-      
-      // Подготовка данных для записи в cash
+
       const masterChangeAmount = order.masterChange ? Number(order.masterChange) : 0;
       const resultAmount = order.result ? Number(order.result) : 0;
-      
+
       const cashData: any = {
         name: 'приход',
         amount: masterChangeAmount,
-        city: order.city || 'Не указан',
+        cityId: order.cityId,
         note: `Итог по заказу: ${resultAmount}₽`,
         paymentPurpose: `Заказ №${order.id}`,
       };
-      
-      // БСО хранится в заказе (order.bsoDoc), не дублируем в кассу
-      // receiptDoc в кассе используется только для ручных расходов
 
-      // Получаем JWT токен из заголовков запроса
       const authHeader = requestHeaders?.authorization || requestHeaders?.Authorization;
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (authHeader) {
         headers['Authorization'] = Array.isArray(authHeader) ? authHeader[0] : authHeader;
       } else {
-        this.logger.warn(`[syncCashReceipt] No Authorization header found for order #${order.id}`);
+        this.logger.warn(`[syncCashReceipt] No Authorization header for order #${order.id}`);
       }
 
-      this.logger.debug(`[syncCashReceipt] Sending HTTP POST to ${cashServiceUrl}/api/v1/cash for order #${order.id}`);
-      
-      // ✅ RETRY-логика: 3 попытки с экспоненциальной задержкой
       let lastError: Error | null = null;
       let response: any = null;
       const maxRetries = 3;
-      
+
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
           const httpStartTime = Date.now();
-          
           response = await firstValueFrom(
             this.httpService.post(
               `${cashServiceUrl}/api/v1/cash`,
               cashData,
-              { 
-                headers,
-                timeout: 5000, // ✅ Таймаут 5 секунд (локальная сеть)
-                maxRedirects: 0,
-                validateStatus: (status) => status >= 200 && status < 300,
-              }
+              { headers, timeout: 5000, maxRedirects: 0, validateStatus: (s) => s >= 200 && s < 300 }
             ).pipe(
               timeout(5000),
               catchError((error) => {
                 const httpDuration = Date.now() - httpStartTime;
-                
                 if (error.response) {
-                  const contentType = error.response.headers['content-type'] || '';
                   const statusCode = error.response.status;
                   const data = error.response.data;
-                  
-                  // Если получили HTML вместо JSON
-                  if (contentType.includes('text/html')) {
-                    const htmlPreview = typeof data === 'string' ? data.substring(0, 100) : String(data).substring(0, 100);
-                    this.logger.error(`[syncCashReceipt] ❌ Received HTML instead of JSON from cash-service (${statusCode}): ${htmlPreview}...`);
-                    throw new Error(`Сервер кассы вернул ошибку (${statusCode})`);
-                  }
-                  
-                  // Другие HTTP ошибки - формируем понятное сообщение
                   const errorMsg = data?.message || data?.error || JSON.stringify(data).substring(0, 200);
-                  this.logger.error(`[syncCashReceipt] ❌ HTTP ${statusCode} from cash-service after ${httpDuration}ms: ${errorMsg}`);
+                  this.logger.error(`[syncCashReceipt] HTTP ${statusCode} after ${httpDuration}ms: ${errorMsg}`);
                   throw new Error(`Ошибка от сервера кассы (${statusCode}): ${errorMsg}`);
                 }
-                
-                // Таймаут или network error
-                if (error.code === 'ECONNREFUSED') {
-                  this.logger.error(`[syncCashReceipt] ❌ Cannot connect to cash-service at ${cashServiceUrl}`);
-                  throw new Error('Сервер кассы недоступен');
-                }
-                
-                if (error.name === 'TimeoutError') {
-                  this.logger.error(`[syncCashReceipt] ❌ Timeout (>5s) waiting for cash-service`);
-                  throw new Error('Превышено время ожидания ответа от сервера кассы');
-                }
-                
-                // Прочие ошибки
-                this.logger.error(`[syncCashReceipt] ❌ Unknown error after ${httpDuration}ms: ${error.message}`);
+                if (error.code === 'ECONNREFUSED') throw new Error('Сервер кассы недоступен');
+                if (error.name === 'TimeoutError') throw new Error('Превышено время ожидания кассы');
                 throw error;
               })
             )
           );
-          
-          const httpDuration = Date.now() - httpStartTime;
-          this.logger.log(`[syncCashReceipt] ✅ Cash synced for order #${order.id} in ${httpDuration}ms (attempt ${attempt})`);
-          break; // Успех - выходим из цикла
-          
+          this.logger.log(`[syncCashReceipt] ✅ Synced for order #${order.id} (attempt ${attempt})`);
+          break;
         } catch (err) {
           lastError = err instanceof Error ? err : new Error(String(err));
-          
           if (attempt < maxRetries) {
-            const delayMs = Math.pow(2, attempt - 1) * 500; // 500ms, 1s, 2s
-            this.logger.warn(`[syncCashReceipt] Attempt ${attempt} failed for order #${order.id}, retrying in ${delayMs}ms...`);
+            const delayMs = Math.pow(2, attempt - 1) * 500;
+            this.logger.warn(`[syncCashReceipt] Attempt ${attempt} failed, retry in ${delayMs}ms...`);
             await new Promise(resolve => setTimeout(resolve, delayMs));
           } else {
             this.logger.error(`[syncCashReceipt] All ${maxRetries} attempts failed for order #${order.id}`);
           }
         }
       }
-      
-      // Если после всех попыток не удалось
-      if (!response && lastError) {
-        throw lastError;
-      }
-      
-      // Обновляем статус подачи кассы в заказе
-      this.logger.debug(`[syncCashReceipt] Updating order #${order.id} status in DB`);
-      await this.prisma.order.update({
-        where: { id: order.id },
-        data: {
-          cashSubmissionStatus: 'Отправлено',
-          cashSubmissionDate: new Date(),
-          cashSubmissionAmount: masterChangeAmount,
+
+      if (!response && lastError) throw lastError;
+
+      // Обновляем статус CashSubmission
+      await this.prisma.cashSubmission.upsert({
+        where: { orderId: order.id },
+        create: {
+          orderId: order.id,
+          status: 'submitted',
+          amount: masterChangeAmount,
+          submittedAt: new Date(),
+        },
+        update: {
+          status: 'submitted',
+          amount: masterChangeAmount,
+          submittedAt: new Date(),
         },
       });
 
-      const totalDuration = Date.now() - startTime;
-      this.logger.debug(`[syncCashReceipt] COMPLETE for order #${order.id} in ${totalDuration}ms`);
-
+      this.logger.debug(`[syncCashReceipt] COMPLETE in ${Date.now() - startTime}ms`);
     } catch (error) {
-      const totalDuration = Date.now() - startTime;
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      this.logger.error(`[syncCashReceipt] FAILED for order #${order.id} after ${totalDuration}ms: ${errorMessage}`);
-      
-      // ✅ ИСПРАВЛЕНИЕ: Бросаем исключение наверх для отката транзакции
+      this.logger.error(`[syncCashReceipt] FAILED: ${error instanceof Error ? error.message : 'Unknown'}`);
+
       try {
-        await this.prisma.order.update({
-          where: { id: order.id },
-          data: {
-            cashSubmissionStatus: 'Ошибка синхронизации',
-            cashSubmissionDate: new Date(),
-          },
+        await this.prisma.cashSubmission.upsert({
+          where: { orderId: order.id },
+          create: { orderId: order.id, status: 'sync_error', amount: 0, submittedAt: new Date() },
+          update: { status: 'sync_error' },
         });
       } catch (updateError) {
         this.logger.error(`Failed to update error status: ${updateError instanceof Error ? updateError.message : 'Unknown'}`);
       }
-      
-      // Пробрасываем ошибку для отката статуса заказа
+
       throw error;
     }
   }
 
-  // ✅ ОПТИМИЗАЦИЯ: Использование DISTINCT вместо загрузки всех заказов
-  // Скорость: 500ms → 10ms (50x ускорение)
-  // ✅ FIX: Добавлен кэш для предотвращения timeout при частых запросах
+  // ─────────────────────────────────────────
+  // FILTER OPTIONS
+  // ─────────────────────────────────────────
+
   async getFilterOptions(user: AuthUser) {
     const startTime = Date.now();
-    this.logger.debug(`[getFilterOptions] START for user ${user.userId} (${user.role})`);
-    
+    this.logger.debug(`[getFilterOptions] user ${user.userId} (${user.role})`);
+
     try {
-      // ✅ Генерируем ключ кэша на основе роли и городов пользователя
-      const cacheKey = user.role === 'master' 
-        ? `master_${user.userId}` 
-        : user.role === 'director' && user.cities?.length 
-          ? `director_${user.cities.sort().join(',')}` 
+      const cacheKey = user.role === 'master'
+        ? `master_${user.userId}`
+        : user.role === 'director' && user.cityIds?.length
+          ? `director_${user.cityIds.sort().join(',')}`
           : 'global';
-      
-      // ✅ Проверяем кэш
+
       const cached = this.filterOptionsCache.get(cacheKey);
       if (cached && cached.expiry > Date.now()) {
-        // ✅ LRU: Обновляем время последнего доступа
         cached.lastAccess = Date.now();
-        this.logger.debug(`[getFilterOptions] CACHE HIT for key=${cacheKey}, age=${Date.now() - (cached.expiry - this.FILTER_OPTIONS_CACHE_TTL)}ms`);
-        return {
-          success: true,
-          data: cached.data,
-          cached: true,
-        };
+        return { success: true, data: cached.data, cached: true };
       }
 
-      // Строим WHERE условия для SQL
       const whereConditions: string[] = [];
       const params: any[] = [];
-      let paramIndex = 1;
+      let p = 1;
 
-      // RBAC фильтры
       if (user.role === 'master') {
-        whereConditions.push(`master_id = $${paramIndex}`);
+        whereConditions.push(`o.master_id = $${p++}`);
         params.push(user.userId);
-        paramIndex++;
       }
 
-      if (user.role === 'director' && user.cities && user.cities.length > 0) {
-        whereConditions.push(`city = ANY($${paramIndex}::text[])`);
-        params.push(user.cities);
-        paramIndex++;
+      if (user.role === 'director' && user.cityIds && user.cityIds.length > 0) {
+        whereConditions.push(`o.city_id = ANY($${p++}::int[])`);
+        params.push(user.cityIds);
       }
 
-      const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
-      const additionalWhere = whereConditions.length > 0 ? 'AND' : 'WHERE';
+      const whereClause = whereConditions.length > 0
+        ? `WHERE ${whereConditions.join(' AND ')}`
+        : '';
+      const addWhere = whereConditions.length > 0 ? 'AND' : 'WHERE';
 
-      this.logger.debug(`[getFilterOptions] Executing DISTINCT queries with whereClause: ${whereClause}, params: ${JSON.stringify(params)}`);
-
-      // ✅ FIX: Проверяем соединение перед тяжёлым запросом (предотвращает зависание на мёртвом соединении)
       await this.prisma.ensureConnection();
 
-      // ✅ FIX: Выполняем запрос с retry логикой для обработки idle-session timeout
-      const executeQueries = async (attempt: number = 1): Promise<[Array<{ rk: string }>, Array<{ type_equipment: string }>, Array<{ city: string }>]> => {
+      const executeQueries = async (attempt = 1): Promise<any[][]> => {
         const queryStartTime = Date.now();
-        
+
         const queryPromise = Promise.all([
-          // Уникальные РК
-          this.prisma.$queryRawUnsafe<Array<{ rk: string }>>(
-            `SELECT DISTINCT rk FROM orders ${whereClause} ${additionalWhere} rk IS NOT NULL ORDER BY rk ASC`,
+          // Уникальные РК из заказов пользователя
+          this.prisma.$queryRawUnsafe<Array<{ id: number; name: string }>>(
+            `SELECT DISTINCT rkt.id, rkt.name
+             FROM orders_service.orders o
+             JOIN references_service.rk rkt ON rkt.id = o.rk_id
+             ${whereClause}
+             ORDER BY rkt.name ASC`,
             ...params
-          ).then(result => {
-            this.logger.debug(`[getFilterOptions] RK query completed in ${Date.now() - queryStartTime}ms, rows: ${result.length}`);
-            return result;
-          }),
+          ),
           // Уникальные типы оборудования
-          this.prisma.$queryRawUnsafe<Array<{ type_equipment: string }>>(
-            `SELECT DISTINCT type_equipment FROM orders ${whereClause} ${additionalWhere} type_equipment IS NOT NULL ORDER BY type_equipment ASC`,
+          this.prisma.$queryRawUnsafe<Array<{ id: number; name: string }>>(
+            `SELECT DISTINCT et.id, et.name
+             FROM orders_service.orders o
+             JOIN references_service.equipment_types et ON et.id = o.equipment_type_id
+             ${whereClause}
+             ORDER BY et.name ASC`,
             ...params
-          ).then(result => {
-            this.logger.debug(`[getFilterOptions] Equipment query completed in ${Date.now() - queryStartTime}ms, rows: ${result.length}`);
-            return result;
-          }),
-          // Уникальные города
-          this.prisma.$queryRawUnsafe<Array<{ city: string }>>(
-            `SELECT DISTINCT city FROM orders ${whereClause} ${additionalWhere} city IS NOT NULL ORDER BY city ASC`,
+          ),
+          // Города
+          this.prisma.$queryRawUnsafe<Array<{ id: number; name: string }>>(
+            `SELECT DISTINCT c.id, c.name
+             FROM orders_service.orders o
+             JOIN references_service.cities c ON c.id = o.city_id
+             ${whereClause}
+             ORDER BY c.name ASC`,
             ...params
-          ).then(result => {
-            this.logger.debug(`[getFilterOptions] City query completed in ${Date.now() - queryStartTime}ms, rows: ${result.length}`);
-            return result;
-          }),
+          ),
+          // Все статусы (из reference)
+          this.prisma.$queryRawUnsafe<Array<{ id: number; name: string; code: string; color: string | null; sortOrder: number }>>(
+            `SELECT id, name, code, color, sort_order AS "sortOrder"
+             FROM references_service.order_statuses
+             WHERE is_active = true
+             ORDER BY sort_order ASC`
+          ),
+          // Все типы заказов
+          this.prisma.$queryRawUnsafe<Array<{ id: number; name: string }>>(
+            `SELECT id, name FROM references_service.order_types WHERE is_active = true ORDER BY name ASC`
+          ),
         ]);
 
-        // Таймаут 5 секунд (уменьшено с 10 для быстрого retry)
-        const timeoutPromise = new Promise<never>((_, reject) => 
-          setTimeout(() => reject(new Error('getFilterOptions query timeout (>5s)')), 5000)
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('getFilterOptions timeout (>5s)')), 5000)
         );
 
         try {
           return await Promise.race([queryPromise, timeoutPromise]);
         } catch (error: any) {
-          const isRetryableError = 
-            error.message?.includes('timeout') ||
-            error.message?.includes('idle-session') ||
-            error.message?.includes('57P05') ||
-            error.message?.includes('terminating connection') ||
-            error.message?.includes('Connection reset');
-          
-          if (isRetryableError && attempt < 3) {
-            this.logger.warn(`[getFilterOptions] Attempt ${attempt} failed, retrying... (${error.message})`);
-            // Небольшая пауза перед retry
+          const isRetryable = error.message?.includes('timeout') || error.message?.includes('idle-session') || error.message?.includes('57P05');
+          if (isRetryable && attempt < 3) {
+            this.logger.warn(`[getFilterOptions] Attempt ${attempt} failed, retrying...`);
             await new Promise(resolve => setTimeout(resolve, 500 * attempt));
             return executeQueries(attempt + 1);
           }
@@ -1591,233 +1448,168 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
         }
       };
 
-      const [rksResult, typeEquipmentsResult, citiesResult] = await executeQueries();
+      const [rks, equipmentTypes, cities, statuses, orderTypes] = await executeQueries();
 
-      const result = {
-        rks: rksResult.map(r => r.rk),
-        typeEquipments: typeEquipmentsResult.map(t => t.type_equipment),
-        cities: citiesResult.map(c => c.city),
-      };
+      const result = { rks, equipmentTypes, cities, statuses, orderTypes };
 
-      // ✅ LRU: Проверяем размер кэша и удаляем старые записи если нужно
       if (this.filterOptionsCache.size >= this.FILTER_OPTIONS_CACHE_MAX_SIZE) {
         this.evictLRUCacheEntry();
       }
-      
-      // ✅ Сохраняем в кэш с временем последнего доступа
+
       this.filterOptionsCache.set(cacheKey, {
         data: result,
         expiry: Date.now() + this.FILTER_OPTIONS_CACHE_TTL,
         lastAccess: Date.now(),
       });
-      this.logger.debug(`[getFilterOptions] Cached result for key=${cacheKey}, cache size=${this.filterOptionsCache.size}`);
 
       const duration = Date.now() - startTime;
-      this.logger.debug(`[getFilterOptions] COMPLETE in ${duration}ms (RKs: ${rksResult.length}, Equipment: ${typeEquipmentsResult.length}, Cities: ${citiesResult.length})`);
+      this.logger.debug(`[getFilterOptions] COMPLETE in ${duration}ms`);
 
-      if (duration > 1000) {
-        this.logger.warn(`[getFilterOptions] SLOW QUERY: ${duration}ms`);
-      }
-
-      return {
-        success: true,
-        data: result,
-      };
+      return { success: true, data: result };
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      this.logger.error(`[getFilterOptions] FAILED after ${duration}ms: ${error.message}`);
-      this.logger.error(`[getFilterOptions] Error stack: ${error.stack}`);
-      this.logger.error(`[getFilterOptions] User: ${JSON.stringify({ role: user.role, cities: user.cities })}`);
-      
-      // ✅ FIX: При ошибке возвращаем пустые опции вместо падения
-      // Это лучше чем 500 ошибка для пользователя
+      this.logger.error(`[getFilterOptions] FAILED: ${error.message}`);
       if (error.message?.includes('timeout')) {
-        this.logger.warn('[getFilterOptions] Returning empty options due to timeout');
-        return {
-          success: true,
-          data: { rks: [], typeEquipments: [] },
-          error: 'timeout',
-        };
+        return { success: true, data: { rks: [], equipmentTypes: [], cities: [], statuses: [], orderTypes: [] }, error: 'timeout' };
       }
-      
       throw error;
     }
   }
 
-  // ✅ Метод для инвалидации кэша filter options (вызывать при создании/обновлении заказа)
   private invalidateFilterOptionsCache() {
     this.filterOptionsCache.clear();
     this.logger.debug('[getFilterOptions] Cache invalidated');
   }
 
-  /**
-   * ✅ LRU Eviction: Удаляет самую старую запись из кэша
-   * Используется когда кэш достигает FILTER_OPTIONS_CACHE_MAX_SIZE
-   */
   private evictLRUCacheEntry() {
     let oldestKey: string | null = null;
     let oldestAccess = Infinity;
-
     for (const [key, value] of this.filterOptionsCache.entries()) {
       if (value.lastAccess < oldestAccess) {
         oldestAccess = value.lastAccess;
         oldestKey = key;
       }
     }
-
     if (oldestKey) {
       this.filterOptionsCache.delete(oldestKey);
-      this.logger.debug(`[getFilterOptions] LRU evicted key=${oldestKey}, cache size=${this.filterOptionsCache.size}`);
     }
   }
+
+  // ─────────────────────────────────────────
+  // SUBMIT CASH FOR REVIEW
+  // ─────────────────────────────────────────
 
   async submitCashForReview(orderId: number, cashReceiptDoc: string | undefined, user: AuthUser) {
     this.logger.log(`Submitting cash for review: Order ${orderId} by Master ${user.userId}`);
 
     try {
-      // Проверяем существование заказа
       const order = await this.prisma.order.findUnique({
         where: { id: orderId },
-        include: {
-          master: {
-            select: { id: true, name: true }
-          }
-        }
+        include: { status: true, master: { select: { id: true, name: true } } }
       });
 
-      if (!order) {
-        return {
-          success: false,
-          error: 'Заказ не найден'
-        };
-      }
+      if (!order) return { success: false, error: 'Заказ не найден' };
 
-      // Проверяем, что заказ принадлежит этому мастеру
       if (order.masterId !== user.userId) {
-        return {
-          success: false,
-          error: 'Вы не можете отправить сдачу по чужому заказу'
-        };
+        return { success: false, error: 'Вы не можете отправить сдачу по чужому заказу' };
       }
 
-      // Проверяем статус заказа
-      if (order.statusOrder !== 'Готово') {
-        return {
-          success: false,
-          error: 'Можно отправить сдачу только по завершенным заказам'
-        };
+      if (order.status.code !== STATUS.DONE) {
+        return { success: false, error: 'Можно отправить сдачу только по завершенным заказам' };
       }
 
-      // ✅ FIX: Проверяем, что касса не на проверке уже
-      if (order.cashSubmissionStatus === 'На проверке') {
-        return {
-          success: false,
-          error: 'Сдача уже отправлена на проверку. Дождитесь решения директора.'
-        };
+      const existingCs = await this.prisma.cashSubmission.findUnique({ where: { orderId } });
+      if (existingCs?.status === 'pending_review') {
+        return { success: false, error: 'Сдача уже отправлена на проверку. Дождитесь решения директора.' };
       }
 
-      // Обновляем заказ
-      const updatedOrder = await this.prisma.order.update({
-        where: { id: orderId },
-        data: {
-          cashSubmissionStatus: 'На проверке',
-          cashReceiptDoc: cashReceiptDoc || null,
-          cashSubmissionDate: new Date(),
-          cashSubmissionAmount: order.masterChange || 0,
-        }
+      const cashSubmission = await this.prisma.cashSubmission.upsert({
+        where: { orderId },
+        create: {
+          orderId,
+          status: 'pending_review',
+          amount: order.masterChange || 0,
+          submittedAt: new Date(),
+        },
+        update: {
+          status: 'pending_review',
+          submittedAt: new Date(),
+          amount: order.masterChange || 0,
+        },
       });
 
-      this.logger.log(`✅ Cash submission successful: Order #${orderId}, Status: "На проверке"`);
+      // Сохраняем чек как документ если передан
+      if (cashReceiptDoc) {
+        await this.prisma.orderDocument.upsert({
+          where: { id: 0 } as any,
+          create: { orderId, type: 'cash_receipt', url: cashReceiptDoc },
+          update: {},
+        });
+      }
+
+      this.logger.log(`✅ Cash submission successful: Order #${orderId}`);
 
       return {
         success: true,
         message: 'Сдача успешно отправлена на проверку',
         data: {
-          id: updatedOrder.id,
-          cashSubmissionStatus: updatedOrder.cashSubmissionStatus,
-          cashReceiptDoc: updatedOrder.cashReceiptDoc,
-        }
+          id: cashSubmission.id,
+          status: cashSubmission.status,
+        },
       };
     } catch (error) {
       this.logger.error(`❌ Failed to submit cash for review: ${error.message}`, error.stack);
-      return {
-        success: false,
-        error: `Ошибка при отправке сдачи: ${error.message}`
-      };
+      return { success: false, error: `Ошибка при отправке сдачи: ${error.message}` };
     }
   }
 
-  /**
-   * Получить историю изменений заказа из audit_logs
-   */
+  // ─────────────────────────────────────────
+  // ORDER HISTORY
+  // ─────────────────────────────────────────
+
   async getOrderHistory(orderId: number, user: AuthUser) {
-    // Проверяем существование заказа
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      select: { id: true, city: true, masterId: true },
+      select: { id: true, cityId: true, masterId: true },
     });
 
-    if (!order) {
-      throw new NotFoundException('Заказ не найден');
-    }
+    if (!order) throw new NotFoundException('Заказ не найден');
 
-    // RBAC: проверяем доступ
     if (user.role === UserRole.MASTER && order.masterId !== user.userId) {
       throw new ForbiddenException('У вас нет доступа к этому заказу');
     }
 
-    if (user.role === UserRole.DIRECTOR && user.cities && !user.cities.includes(order.city)) {
+    if (user.role === UserRole.DIRECTOR && user.cityIds && !user.cityIds.includes(order.cityId)) {
       throw new ForbiddenException('Заказ не в вашем городе');
     }
 
-    // Получаем историю из audit_logs
-    const logs = await this.prisma.auditLog.findMany({
+    const logs = await this.prisma.auditOrders.findMany({
       where: {
-        eventType: {
-          in: ['order.create', 'order.update', 'order.close', 'order.status.change'],
-        },
-        metadata: {
-          path: ['orderId'],
-          equals: orderId,
-        },
+        eventType: { in: ['order.create', 'order.update', 'order.close', 'order.status.change'] },
+        metadata: { path: ['orderId'], equals: orderId },
       },
-      orderBy: {
-        timestamp: 'desc',
-      },
-      take: 100, // Последние 100 записей
+      orderBy: { createdAt: 'desc' },
+      take: 100,
     });
 
-    // Собираем уникальные логины для поиска ФИО
     const logins = [...new Set(logs.map(log => log.login).filter(Boolean))] as string[];
-    
-    // Ищем ФИО в таблицах пользователей
-    const [operators, directors, masters] = await Promise.all([
-      this.prisma.callcentreOperator.findMany({
-        where: { login: { in: logins } },
-        select: { login: true, name: true },
-      }),
-      this.prisma.director.findMany({
-        where: { login: { in: logins } },
-        select: { login: true, name: true },
-      }),
-      this.prisma.master.findMany({
-        where: { login: { in: logins } },
-        select: { login: true, name: true },
-      }),
+
+    const [operators, masters] = await Promise.all([
+      logins.length > 0
+        ? this.prisma.operator.findMany({ where: { login: { in: logins } }, select: { login: true, name: true } })
+        : [],
+      logins.length > 0
+        ? this.prisma.master.findMany({ where: { login: { in: logins } }, select: { login: true, name: true } })
+        : [],
     ]);
 
-    // Создаём карту login -> name
     const loginToName = new Map<string, string>();
-    [...operators, ...directors, ...masters].forEach(user => {
-      if (user.login) {
-        loginToName.set(user.login, user.name);
-      }
+    [...operators, ...masters].forEach(u => {
+      if (u.login) loginToName.set(u.login, u.name);
     });
 
-    // Преобразуем для фронтенда
     const history = logs.map(log => ({
       id: log.id,
-      timestamp: log.timestamp,
+      createdAt: log.createdAt,
       eventType: log.eventType,
       userId: log.userId,
       role: log.role,
@@ -1826,19 +1618,16 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
       metadata: log.metadata,
     }));
 
-    return {
-      success: true,
-      data: history,
-    };
+    return { success: true, data: history };
   }
 
-  /**
-   * Получить заказы по номеру телефона клиента
-   */
+  // ─────────────────────────────────────────
+  // ORDERS BY PHONE
+  // ─────────────────────────────────────────
+
   async getOrdersByPhone(phone: string, user: AuthUser) {
-    // Нормализуем номер телефона (убираем +, пробелы, скобки)
     const normalizedPhone = phone.replace(/[\s\+\(\)\-]/g, '');
-    
+
     const orders = await this.prisma.order.findMany({
       where: {
         OR: [
@@ -1849,28 +1638,25 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
       select: {
         id: true,
         clientName: true,
-        city: true,
-        statusOrder: true,
+        cityId: true,
+        city: { select: { name: true } },
+        statusId: true,
+        status: { select: { name: true, code: true } },
         dateMeeting: true,
-        typeEquipment: true,
-        typeOrder: true,
+        equipmentTypeId: true,
+        equipmentType: { select: { name: true } },
+        orderTypeId: true,
+        orderType: { select: { name: true } },
         problem: true,
         createdAt: true,
-        rk: true,
-        avitoName: true,
+        rkId: true,
+        rk: { select: { name: true } },
         address: true,
         result: true,
-        master: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
+        master: { select: { id: true, name: true } },
       },
-      orderBy: {
-        createdAt: 'desc',
-      },
-      take: 20, // Последние 20 заказов
+      orderBy: { createdAt: 'desc' },
+      take: 20,
     });
 
     return {
@@ -1878,22 +1664,21 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
       data: orders.map(order => ({
         id: order.id,
         clientName: order.clientName,
-        city: order.city,
-        status: order.statusOrder,
+        cityId: order.cityId,
+        cityName: order.city?.name,
+        statusId: order.statusId,
+        statusName: order.status?.name,
+        statusCode: order.status?.code,
         dateMeeting: order.dateMeeting,
-        typeEquipment: order.typeEquipment,
-        typeOrder: order.typeOrder,
+        equipmentTypeName: order.equipmentType?.name,
+        orderTypeName: order.orderType?.name,
         problem: order.problem,
         createdAt: order.createdAt,
-        rk: order.rk,
-        avitoName: order.avitoName,
+        rkName: order.rk?.name,
         address: order.address,
         result: order.result,
         master: order.master,
       })),
     };
   }
-
 }
-
-

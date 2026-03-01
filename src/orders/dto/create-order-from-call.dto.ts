@@ -1,18 +1,48 @@
-import { IsString, IsNotEmpty, IsOptional, IsArray, IsNumber } from 'class-validator';
-import { Transform } from 'class-transformer';
+import { IsString, IsNotEmpty, IsOptional, IsArray, IsNumber, IsDateString, Min } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateOrderFromCallDto {
   @ApiProperty({ type: [Number] }) @IsArray() @IsNotEmpty() callIds: number[];
-  @ApiProperty() @IsString() @IsNotEmpty() rk: string;
-  @ApiProperty() @IsString() @IsNotEmpty() city: string;
-  @ApiProperty({ required: false }) @IsString() @IsOptional() avitoName?: string;
-  @ApiProperty() @IsString() @IsNotEmpty() typeOrder: string;
+
+  @ApiProperty({ description: 'ID рекламной кампании' })
+  @Type(() => Number)
+  @IsNumber()
+  @IsNotEmpty()
+  @Min(1)
+  rkId: number;
+
+  @ApiProperty({ description: 'ID города' })
+  @Type(() => Number)
+  @IsNumber()
+  @IsNotEmpty()
+  @Min(1)
+  cityId: number;
+
+  @ApiProperty({ description: 'ID типа заказа' })
+  @Type(() => Number)
+  @IsNumber()
+  @IsNotEmpty()
+  @Min(1)
+  orderTypeId: number;
+
   @ApiProperty() @IsString() @IsNotEmpty() clientName: string;
   @ApiProperty() @IsString() @IsNotEmpty() address: string;
-  @ApiProperty() @IsString() @IsNotEmpty() dateMeeting: string;
-  @ApiProperty() @IsString() @IsNotEmpty() typeEquipment: string;
-  @ApiProperty() @IsString() @IsNotEmpty() problem: string;
-  @ApiProperty() @IsNumber() @IsNotEmpty() @Transform(({ value }) => parseInt(value)) operatorNameId: number;
-}
+  @ApiProperty() @IsDateString() @IsNotEmpty() dateMeeting: string;
 
+  @ApiProperty({ description: 'ID типа оборудования' })
+  @Type(() => Number)
+  @IsNumber()
+  @IsNotEmpty()
+  @Min(1)
+  equipmentTypeId: number;
+
+  @ApiProperty() @IsString() @IsNotEmpty() problem: string;
+
+  @ApiProperty({ description: 'ID оператора' })
+  @Type(() => Number)
+  @IsNumber()
+  @IsNotEmpty()
+  @Transform(({ value }) => parseInt(value))
+  operatorId: number;
+}

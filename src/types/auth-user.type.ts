@@ -4,6 +4,5 @@ export interface AuthUser {
   login: string;
   role: 'admin' | 'operator' | 'director' | 'master';
   name: string;
-  cities?: string[];
+  cityIds?: number[];
 }
-

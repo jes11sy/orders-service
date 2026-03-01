@@ -18,18 +18,19 @@ export class QueryOrdersDto {
   @Max(300)
   limit?: number = 50;
 
-  @ApiPropertyOptional({ description: 'Статус заказа (можно несколько через запятую: Готово,Отказ,Незаказ)' })
+  @ApiPropertyOptional({ description: 'ID статусов заказа (можно несколько через запятую: 1,2,3)' })
   @IsOptional()
   @IsString()
   @MaxLength(200)
   @Transform(({ value }) => value?.trim())
-  status?: string;
+  statusIds?: string;
 
-  @ApiPropertyOptional({ description: 'Город' })
+  @ApiPropertyOptional({ description: 'ID города' })
   @IsOptional()
-  @IsString()
-  @MaxLength(100)
-  city?: string;
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  cityId?: number;
 
   @ApiPropertyOptional({ description: 'Поисковый запрос (общий)', maximum: 100 })
   @IsOptional()
@@ -78,19 +79,19 @@ export class QueryOrdersDto {
   @IsString()
   closingDate?: string;
 
-  @ApiPropertyOptional({ description: 'РК (рекламная кампания)' })
+  @ApiPropertyOptional({ description: 'ID рекламной кампании' })
   @IsOptional()
-  @IsString()
-  @MaxLength(100)
-  @Transform(({ value }) => value?.trim())
-  rk?: string;
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  rkId?: number;
 
-  @ApiPropertyOptional({ description: 'Направление (тип оборудования)' })
+  @ApiPropertyOptional({ description: 'ID типа оборудования' })
   @IsOptional()
-  @IsString()
-  @MaxLength(100)
-  @Transform(({ value }) => value?.trim())
-  typeEquipment?: string;
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  equipmentTypeId?: number;
 
   @ApiPropertyOptional({ description: 'Тип даты для фильтра (create - создания, close - закрытия, meeting - встречи)', enum: ['create', 'close', 'meeting'] })
   @IsOptional()
@@ -108,4 +109,3 @@ export class QueryOrdersDto {
   @IsString()
   dateTo?: string;
 }
-

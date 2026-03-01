@@ -12,7 +12,7 @@ interface NewOrderNotification {
   dateMeeting: string;
   problem: string;
   rk?: string;
-  avitoName?: string;
+
   typeEquipment?: string;
 }
 
@@ -24,7 +24,7 @@ interface DateChangeNotification {
   oldDate?: string;
   masterId?: number;
   rk?: string;
-  avitoName?: string;
+
   typeEquipment?: string;
 }
 
@@ -36,7 +36,7 @@ interface OrderRejectionNotification {
   reason: string;
   masterId?: number;
   rk?: string;
-  avitoName?: string;
+
   typeEquipment?: string;
   dateMeeting?: string;
 }
@@ -45,7 +45,7 @@ interface MasterAssignedNotification {
   orderId: number;
   masterId: number;
   rk?: string;
-  avitoName?: string;
+
   typeEquipment?: string;
   clientName?: string;
   address?: string;
@@ -61,7 +61,7 @@ interface OrderAcceptedNotification {
   orderId: number;
   masterId?: number;
   rk?: string;
-  avitoName?: string;
+
   typeEquipment?: string;
   clientName?: string;
   dateMeeting?: string;
@@ -82,7 +82,7 @@ interface OrderInModernNotification {
   orderId: number;
   masterId?: number;
   rk?: string;
-  avitoName?: string;
+
   typeEquipment?: string;
   clientName?: string;
   dateMeeting?: string;
@@ -98,7 +98,7 @@ interface CityChangeNotification {
   clientName?: string;
   masterId?: number;
   rk?: string;
-  avitoName?: string;
+
   typeEquipment?: string;
   dateMeeting?: string;
 }
@@ -111,7 +111,7 @@ interface AddressChangeNotification {
   clientName?: string;
   masterId?: number;
   rk?: string;
-  avitoName?: string;
+
   typeEquipment?: string;
   dateMeeting?: string;
 }

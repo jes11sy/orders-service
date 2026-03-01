@@ -1,25 +1,21 @@
-import { IsString, IsNotEmpty, IsOptional, IsNumber, IsDateString, MaxLength, Matches, IsIn, Min } from 'class-validator';
-import { Transform, Type } from 'class-transformer';
+import { IsString, IsNotEmpty, IsOptional, IsNumber, IsDateString, MaxLength, Matches, Min } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateOrderDto {
-  @ApiProperty({ description: 'Рекламная кампания' })
-  @IsString()
+  @ApiProperty({ description: 'ID рекламной кампании' })
+  @Type(() => Number)
+  @IsNumber()
   @IsNotEmpty()
-  @MaxLength(50)
-  rk: string;
+  @Min(1)
+  rkId: number;
 
-  @ApiProperty({ description: 'Город' })
-  @IsString()
+  @ApiProperty({ description: 'ID города' })
+  @Type(() => Number)
+  @IsNumber()
   @IsNotEmpty()
-  @MaxLength(100)
-  city: string;
-
-  @ApiProperty({ required: false, description: 'Имя аккаунта Avito' })
-  @IsString()
-  @IsOptional()
-  @MaxLength(100)
-  avitoName?: string;
+  @Min(1)
+  cityId: number;
 
   @ApiProperty({ description: 'Телефон клиента' })
   @IsString()
@@ -28,11 +24,12 @@ export class CreateOrderDto {
   @MaxLength(15)
   phone: string;
 
-  @ApiProperty({ description: 'Тип заказа' })
-  @IsString()
+  @ApiProperty({ description: 'ID типа заказа' })
+  @Type(() => Number)
+  @IsNumber()
   @IsNotEmpty()
-  @MaxLength(100)
-  typeOrder: string;
+  @Min(1)
+  orderTypeId: number;
 
   @ApiProperty({ description: 'Имя клиента' })
   @IsString()
@@ -53,11 +50,12 @@ export class CreateOrderDto {
   @IsNotEmpty()
   dateMeeting: string;
 
-  @ApiProperty({ description: 'Тип оборудования' })
-  @IsString()
+  @ApiProperty({ description: 'ID типа оборудования' })
+  @Type(() => Number)
+  @IsNumber()
   @IsNotEmpty()
-  @MaxLength(200)
-  typeEquipment: string;
+  @Min(1)
+  equipmentTypeId: number;
 
   @ApiProperty({ description: 'Описание проблемы' })
   @IsString()
@@ -65,30 +63,12 @@ export class CreateOrderDto {
   @MaxLength(2000)
   problem: string;
 
-  @ApiProperty({ required: false, description: 'Запись звонка' })
-  @IsString()
-  @IsOptional()
-  @MaxLength(500)
-  callRecord?: string;
-
-  @ApiProperty({ required: false, default: 'Ожидает', description: 'Статус заказа' })
-  @IsString()
-  @IsOptional()
-  @IsIn(['Ожидает', 'Принял', 'В пути', 'В работе', 'Готово', 'Отказ', 'Модерн', 'Незаказ'])
-  statusOrder?: string;
-
   @ApiProperty({ description: 'ID оператора' })
   @Type(() => Number)
   @IsNumber()
   @IsNotEmpty()
   @Min(1)
-  operatorNameId: number;
-
-  @ApiProperty({ required: false, description: 'ID чата Avito' })
-  @IsString()
-  @IsOptional()
-  @MaxLength(100)
-  avitoChatId?: string;
+  operatorId: number;
 
   @ApiProperty({ required: false, description: 'ID звонка' })
   @IsString()
@@ -103,4 +83,3 @@ export class CreateOrderDto {
   @Matches(/^[^<>]*$/, { message: 'HTML теги не разрешены' })
   comment?: string;
 }
-

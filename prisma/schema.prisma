@@ -1,183 +1,345 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["multiSchema"]
 }
 
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  schemas  = ["orders_service", "references_service", "auth_service", "calls_service", "audit_logs", "error_logs"]
 }
 
-// ✅ FIX #166: Добавлены VarChar ограничения для защиты от unbounded input
-model Order {
-  id             Int       @id @default(autoincrement())
-  rk             String    @db.VarChar(50)
-  city           String    @db.VarChar(100)
-  avitoName      String?   @map("avito_name") @db.VarChar(255)
-  phone          String    @db.VarChar(20)
-  typeOrder      String    @map("type_order") @db.VarChar(100)
-  clientName     String    @map("client_name") @db.VarChar(255)
-  address        String    @db.Text // Адрес может быть длинным
-  dateMeeting    DateTime  @map("date_meeting")
-  typeEquipment  String    @map("type_equipment") @db.VarChar(100)
-  problem        String    @db.Text // Описание проблемы может быть длинным
-  callRecord     String?   @map("call_record") @db.Text // Запись звонка
-  statusOrder    String    @map("status_order") @db.VarChar(50)
-  masterId       Int?      @map("master_id")
-  result         Decimal?  @db.Decimal(10, 2)
-  expenditure    Decimal?  @db.Decimal(10, 2)
-  clean          Decimal?  @db.Decimal(10, 2)
-  masterChange   Decimal?  @map("master_change") @db.Decimal(10, 2)
-  bsoDoc         String[]  @default([]) @map("bso_doc")
-  expenditureDoc String[]  @default([]) @map("expenditure_doc")
-  operatorNameId Int       @map("operator_name_id")
-  createDate     DateTime  @map("create_date")
-  closingData    DateTime? @map("closing_data")
-  createdAt      DateTime  @default(now()) @map("created_at")
-  updatedAt      DateTime  @updatedAt @map("updated_at")
-  avitoChatId    String?   @map("avito_chatid") @db.VarChar(100)
-  callId         String?   @map("call_id") @db.VarChar(100)
-  prepayment     Decimal?  @db.Decimal(10, 2)
-  dateClosmod    DateTime? @map("date_closmod")
-  comment        String?   @db.Text // Комментарий может быть длинным
-  
-  cashSubmissionStatus String?   @map("cash_submission_status") @db.VarChar(50)
-  cashSubmissionDate   DateTime? @map("cash_submission_date")
-  cashSubmissionAmount Decimal?  @map("cash_submission_amount") @db.Decimal(10, 2)
-  cashReceiptDoc       String?   @map("cash_receipt_doc") @db.VarChar(500)
-  
-  partner              Boolean?  @default(false)
-  partnerPercent       Decimal?  @map("partner_percent") @db.Decimal(5, 2)
+// ─────────────────────────────────────────
+// Schema: references_service (read-only)
+// ─────────────────────────────────────────
 
-  // ✅ FIX #146: Добавлены onDelete для предотвращения orphaned records
-  operator CallcentreOperator @relation(fields: [operatorNameId], references: [id], onDelete: Restrict)
-  master   Master?             @relation(fields: [masterId], references: [id], onDelete: SetNull)
+model City {
+  id       Int     @id @default(autoincrement())
+  name     String  @unique @db.VarChar(100)
+  code     String  @unique @db.VarChar(20)
+  isActive Boolean @default(true) @map("is_active")
 
-  // ✅ FIX #167: Оптимизированные индексы (удалены дубликаты)
-  @@index([statusOrder, city])
-  @@index([closingData])
-  @@index([masterId, city, closingData])
-  @@index([phone])
-  @@index([createDate, city])           // ✅ Покрывает createDate-only запросы (leftmost prefix)
-  @@index([operatorNameId])
-  // REMOVED: @@index([createDate]) — дубликат, покрыт [createDate, city]
-  @@index([clientName])
-  // REMOVED: @@index([address]) — TEXT поля неэффективны для B-tree, используйте FTS
-  @@index([statusOrder, masterId])
-  @@index([avitoChatId])
-  @@index([cashSubmissionStatus])
-  @@index([city])                       // Для WHERE city = ANY($1::text[])
-  @@index([city, rk])
-  @@index([city, typeEquipment])
-  @@index([rk])
-  @@index([typeEquipment])
-  @@map("orders")
+  orders      Order[]
+  siteOrders  SiteOrder[]
+
+  @@schema("references_service")
+  @@map("cities")
 }
 
-model CallcentreOperator {
-  id         Int      @id @default(autoincrement())
-  name       String   @db.VarChar(255)
-  login      String   @unique @db.VarChar(255)
-  password   String   @db.VarChar(255)
-  city       String   @db.VarChar(100)
-  status     String   @db.VarChar(50)
-  statusWork String   @map("status_work") @db.VarChar(50)
-  passport   String?  @db.VarChar(500)
-  contract   String?  @db.VarChar(500)
-  dateCreate DateTime @map("date_create")
-  note       String?  @db.Text
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
-  sipAddress String?  @map("sip_address") @db.VarChar(255)
-  
+model Rk {
+  id       Int     @id @default(autoincrement())
+  code     String  @unique @db.VarChar(50)
+  name     String  @db.VarChar(255)
+  isActive Boolean @default(true) @map("is_active")
+
   orders Order[]
 
-  @@map("callcentre_operator")
+  @@schema("references_service")
+  @@map("rk")
+}
+
+model OrderType {
+  id       Int     @id @default(autoincrement())
+  name     String  @unique @db.VarChar(100)
+  isActive Boolean @default(true) @map("is_active")
+
+  orders Order[]
+
+  @@schema("references_service")
+  @@map("order_types")
+}
+
+model EquipmentType {
+  id       Int     @id @default(autoincrement())
+  name     String  @unique @db.VarChar(100)
+  isActive Boolean @default(true) @map("is_active")
+
+  orders Order[]
+
+  @@schema("references_service")
+  @@map("equipment_types")
+}
+
+model OrderStatus {
+  id        Int     @id @default(autoincrement())
+  name      String  @unique @db.VarChar(100)
+  code      String  @unique @db.VarChar(50)
+  color     String? @db.VarChar(20)
+  sortOrder Int     @default(0) @map("sort_order")
+  isActive  Boolean @default(true) @map("is_active")
+
+  orders Order[]
+
+  @@schema("references_service")
+  @@map("order_statuses")
+}
+
+// ─────────────────────────────────────────
+// Schema: auth_service (read-only)
+// ─────────────────────────────────────────
+
+model Operator {
+  id    Int    @id @default(autoincrement())
+  name  String @db.VarChar(255)
+  login String @unique @db.VarChar(255)
+  role  String @db.VarChar(50)
+
+  orders Order[]
+
+  @@schema("auth_service")
+  @@map("operators")
 }
 
 model Master {
-  id          Int      @id @default(autoincrement())
-  cities      String[]
-  name        String   @db.VarChar(255)
-  login       String?  @unique @db.VarChar(255)
-  password    String?  @db.VarChar(255)
-  passportDoc String?  @map("passport_doc") @db.VarChar(500)
-  contractDoc String?  @map("contract_doc") @db.VarChar(500)
-  statusWork  String   @map("status_work") @db.VarChar(50)
-  dateCreate  DateTime @default(now()) @map("date_create")
-  note        String?  @db.Text
-  tgId        String?  @map("tg_id") @db.VarChar(50)
-  chatId      String?  @map("chat_id") @db.VarChar(50)
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
-  
+  id    Int    @id @default(autoincrement())
+  name  String @db.VarChar(255)
+  login String? @unique @db.VarChar(255)
+  role  String @db.VarChar(50)
+
   orders Order[]
 
-  @@map("master")
+  @@schema("auth_service")
+  @@map("masters")
 }
 
 model Director {
-  id          Int      @id @default(autoincrement())
-  cities      String[]
-  name        String   @db.VarChar(255)
-  login       String   @unique @db.VarChar(255)
-  password    String   @db.VarChar(255)
-  contractDoc String?  @map("contract_doc") @db.VarChar(500)
-  passportDoc String?  @map("passport_doc") @db.VarChar(500)
-  dateCreate  DateTime @default(now()) @map("date_create")
-  note        String?  @db.Text
-  tgId        String?  @map("tg_id") @db.VarChar(50)
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id    Int     @id @default(autoincrement())
+  name  String  @db.VarChar(255)
+  login String? @unique @db.VarChar(255)
+  role  String  @db.VarChar(50)
 
-  @@map("director")
+  @@schema("auth_service")
+  @@map("directors")
 }
+
+// ─────────────────────────────────────────
+// Schema: calls_service (read-only, for cross-service lookups)
+// ─────────────────────────────────────────
 
 model Call {
-  id           Int      @id @default(autoincrement())
-  rk           String   @db.VarChar(50)
-  city         String   @db.VarChar(100)
-  avitoName    String?  @map("avito_name") @db.VarChar(255)
-  phoneClient  String   @map("phone_client") @db.VarChar(20)
-  phoneAts     String   @map("phone_ats") @db.VarChar(20)
-  operatorId   Int      @map("operator_id")
-  status       String   @db.VarChar(50)
-  callId       String?  @unique @map("call_id") @db.VarChar(100)
-  duration     Int?
-  recordUrl    String?  @map("record_url") @db.VarChar(500)
-  recordingPath String? @map("recording_path") @db.VarChar(500)
+  id           Int     @id @default(autoincrement())
+  phoneClient  String  @map("phone_client") @db.VarChar(20)
+  operatorId   Int     @map("operator_id")
+  callId       String? @unique @map("call_id") @db.VarChar(100)
   createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
 
+  @@schema("calls_service")
   @@map("calls")
-  @@index([city])
-  @@index([createdAt])
-  @@index([operatorId])
-  @@index([phoneClient])
-  @@index([callId])
 }
 
-model AuditLog {
+// ─────────────────────────────────────────
+// Schema: orders_service
+// ─────────────────────────────────────────
+
+/// Заказы (основная бизнес-сущность)
+model Order {
+  id              Int       @id @default(autoincrement())
+  cityId          Int       @map("city_id")
+  rkId            Int       @map("rk_id")
+  phone           String    @db.VarChar(20)
+  orderTypeId     Int       @map("order_type_id")
+  clientName      String    @map("client_name") @db.VarChar(255)
+  address         String    @db.Text
+  dateMeeting     DateTime  @map("date_meeting")
+  equipmentTypeId Int       @map("equipment_type_id")
+  problem         String    @db.Text
+  statusId        Int       @map("status_id")
+  operatorId      Int       @map("operator_id")
+  masterId        Int?      @map("master_id")
+  result          Decimal?  @db.Decimal(10, 2)
+  expenditure     Decimal?  @db.Decimal(10, 2)
+  clean           Decimal?  @db.Decimal(10, 2)
+  masterChange    Decimal?  @map("master_change") @db.Decimal(10, 2)
+  prepayment      Decimal?  @db.Decimal(10, 2)
+  callId          String?   @map("call_id") @db.VarChar(100)
+  appealId        Int?      @map("appeal_id")
+  dateCloseMod    DateTime? @map("date_close_mod")
+  closingAt       DateTime? @map("closing_at")
+  version         Int       @default(1)
+  hasPoverka      Boolean   @default(false) @map("has_poverka")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  city          City          @relation(fields: [cityId], references: [id])
+  rk            Rk            @relation(fields: [rkId], references: [id])
+  orderType     OrderType     @relation(fields: [orderTypeId], references: [id])
+  equipmentType EquipmentType @relation(fields: [equipmentTypeId], references: [id])
+  status        OrderStatus   @relation(fields: [statusId], references: [id])
+  operator      Operator      @relation(fields: [operatorId], references: [id])
+  master        Master?       @relation(fields: [masterId], references: [id])
+  comments      OrderComment[]
+  documents     OrderDocument[]
+  cashSubmission CashSubmission?
+  poverkas      OrderPoverka[]
+
+  @@index([cityId])
+  @@index([statusId])
+  @@index([masterId])
+  @@index([operatorId])
+  @@index([createdAt])
+  @@index([dateMeeting])
+  @@index([phone])
+  @@index([orderTypeId])
+  @@index([equipmentTypeId])
+  @@index([rkId])
+  @@index([closingAt])
+  @@index([cityId, statusId])
+  @@index([cityId, dateMeeting])
+  @@index([masterId, statusId])
+  @@index([operatorId, createdAt])
+  @@index([cityId, statusId, dateMeeting])
+  @@index([appealId])
+  @@index([statusId, createdAt])
+  @@index([cityId, masterId])
+  @@index([cityId, operatorId])
+  @@schema("orders_service")
+  @@map("orders")
+}
+
+/// Данные поверки счётчиков
+model OrderPoverka {
+  id              Int      @id @default(autoincrement())
+  orderId         Int      @map("order_id")
+  poverkaDate     DateTime @map("poverka_date") @db.Date
+  city            String   @db.VarChar(100)
+  street          String   @db.VarChar(255)
+  house           String   @db.VarChar(50)
+  apartment       String?  @db.VarChar(50)
+  clientName      String   @map("client_name") @db.VarChar(255)
+  modification    String?  @db.VarChar(100)
+  serialNumber    String   @map("serial_number") @db.VarChar(100)
+  manufactureYear Int?     @map("manufacture_year")
+  readings        Decimal? @db.Decimal(12, 3)
+  grsi            String?  @db.VarChar(100)
+  mpi             String?  @db.VarChar(50)
+  waterType       String   @map("water_type") @db.VarChar(10)
+  personType      String   @map("person_type") @db.VarChar(10)
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([serialNumber])
+  @@index([poverkaDate])
+  @@schema("orders_service")
+  @@map("order_poverka")
+}
+
+/// Комментарии к заказам
+model OrderComment {
   id        Int      @id @default(autoincrement())
-  timestamp DateTime @default(now())
-  eventType String   @db.VarChar(100)
-  userId    Int?
+  orderId   Int      @map("order_id")
+  role      String   @db.VarChar(50)
+  userId    Int      @map("user_id")
+  text      String   @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([userId, role])
+  @@schema("orders_service")
+  @@map("order_comments")
+}
+
+/// Документы к заказам (БСО, чеки, фото)
+model OrderDocument {
+  id        Int      @id @default(autoincrement())
+  orderId   Int      @map("order_id")
+  type      String   @db.VarChar(50)
+  url       String   @db.VarChar(500)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([type])
+  @@schema("orders_service")
+  @@map("order_documents")
+}
+
+/// Сдача кассы по заказам
+model CashSubmission {
+  id          Int       @id @default(autoincrement())
+  orderId     Int       @unique @map("order_id")
+  status      String    @db.VarChar(50)
+  amount      Decimal   @db.Decimal(10, 2)
+  receiptDoc  String?   @map("receipt_doc") @db.VarChar(500)
+  submittedAt DateTime? @map("submitted_at")
+  approvedBy  Int?      @map("approved_by")
+  approvedAt  DateTime? @map("approved_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([approvedBy])
+  @@index([submittedAt])
+  @@index([status, submittedAt])
+  @@schema("orders_service")
+  @@map("cash_submissions")
+}
+
+/// Заявки с сайта
+model SiteOrder {
+  id              Int       @id @default(autoincrement())
+  cityId          Int       @map("city_id")
+  site            String    @db.VarChar(255)
+  clientName      String    @map("client_name") @db.VarChar(255)
+  phone           String    @db.VarChar(20)
+  status          String?   @db.VarChar(50)
+  comment         String?   @db.Text
+  commentOperator String?   @map("comment_operator") @db.Text
+  orderId         Int?      @map("order_id")
+  callbackAt      DateTime? @map("callback_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  city City @relation(fields: [cityId], references: [id])
+
+  @@index([status])
+  @@index([cityId])
+  @@index([createdAt])
+  @@index([phone])
+  @@index([orderId])
+  @@index([callbackAt])
+  @@index([cityId, status])
+  @@schema("orders_service")
+  @@map("site_orders")
+}
+
+// ─────────────────────────────────────────
+// Schema: audit_logs
+// ─────────────────────────────────────────
+
+model AuditOrders {
+  id        Int      @id @default(autoincrement())
+  eventType String   @map("event_type") @db.VarChar(100)
+  userId    Int?     @map("user_id")
   role      String?  @db.VarChar(50)
   login     String?  @db.VarChar(255)
   ip        String   @db.VarChar(45)
-  userAgent String   @db.Text
+  userAgent String   @map("user_agent") @db.Text
   success   Boolean
   metadata  Json?    @db.JsonB
+  createdAt DateTime @default(now()) @map("created_at")
 
-  @@index([userId, timestamp(sort: Desc)])
-  @@index([eventType, timestamp(sort: Desc)])
-  @@index([timestamp(sort: Desc)])
-  @@map("audit_logs")
+  @@index([eventType])
+  @@index([userId])
+  @@index([createdAt])
+  @@index([success])
+  @@index([role, createdAt])
+  @@schema("audit_logs")
+  @@map("audit_orders")
 }
 
-model ErrorLog {
+// ─────────────────────────────────────────
+// Schema: error_logs
+// ─────────────────────────────────────────
+
+model ErrorOrders {
   id            Int      @id @default(autoincrement())
-  timestamp     DateTime @default(now())
-  service       String   @db.VarChar(100)
   errorType     String   @map("error_type") @db.VarChar(255)
   errorMessage  String   @map("error_message") @db.Text
   stackTrace    String?  @map("stack_trace") @db.Text
@@ -188,31 +350,12 @@ model ErrorLog {
   ip            String?  @db.VarChar(45)
   userAgent     String?  @map("user_agent") @db.Text
   metadata      Json?    @db.JsonB
+  createdAt     DateTime @default(now()) @map("created_at")
 
-  @@index([timestamp(sort: Desc)])
-  @@index([service, timestamp(sort: Desc)])
   @@index([errorType])
   @@index([userId])
-  @@map("error_logs")
+  @@index([createdAt])
+  @@index([userRole, createdAt])
+  @@schema("error_logs")
+  @@map("error_orders")
 }
-
-// Заявки с сайта
-model SiteOrder {
-  id              Int      @id @default(autoincrement())
-  city            String   @db.VarChar(100)
-  site            String   @db.VarChar(255)
-  clientName      String   @map("client_name") @db.VarChar(255)
-  phone           String   @db.VarChar(20)
-  status          String?  @db.VarChar(50)
-  comment         String?  @db.Text
-  commentOperator String?  @map("comment_operator") @db.Text
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
-  orderId         Int?     @map("order_id")
-
-  @@index([status])
-  @@index([city])
-  @@index([createdAt(sort: Desc)])
-  @@map("site_orders")
-}
-
