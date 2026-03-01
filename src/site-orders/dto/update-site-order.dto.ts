@@ -2,9 +2,8 @@ import { IsString, IsOptional, MaxLength, IsIn, IsInt } from 'class-validator';
 
 export class UpdateSiteOrderDto {
   @IsOptional()
-  @IsString()
-  @MaxLength(100)
-  city?: string;
+  @IsInt()
+  cityId?: number;
 
   @IsOptional()
   @IsString()

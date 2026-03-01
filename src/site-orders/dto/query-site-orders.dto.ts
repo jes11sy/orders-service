@@ -7,8 +7,9 @@ export class QuerySiteOrdersDto {
   status?: string;
 
   @IsOptional()
-  @IsString()
-  city?: string;
+  @Type(() => Number)
+  @IsInt()
+  cityId?: number;
 
   @IsOptional()
   @IsString()

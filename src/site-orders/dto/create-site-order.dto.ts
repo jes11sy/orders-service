@@ -1,10 +1,9 @@
-import { IsString, IsNotEmpty, MaxLength, IsOptional } from 'class-validator';
+import { IsString, IsNotEmpty, MaxLength, IsOptional, IsInt } from 'class-validator';
 
 export class CreateSiteOrderDto {
-  @IsString()
+  @IsInt()
   @IsNotEmpty({ message: 'Город обязателен' })
-  @MaxLength(100)
-  city: string;
+  cityId: number;
 
   @IsString()
   @IsNotEmpty({ message: 'Сайт обязателен' })

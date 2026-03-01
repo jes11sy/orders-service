@@ -1681,4 +1681,28 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
       })),
     };
   }
+
+  async getOrderAvitoChat(id: number, user: AuthUser) {
+    const order = await this.prisma.order.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        clientName: true,
+        phone: true,
+        city: { select: { name: true } },
+        rk: { select: { name: true, code: true } },
+        status: { select: { name: true, code: true } },
+        problem: true,
+        address: true,
+        dateMeeting: true,
+        createdAt: true,
+      },
+    });
+
+    if (!order) {
+      throw new NotFoundException(`Order ${id} not found`);
+    }
+
+    return { success: true, data: order };
+  }
 }

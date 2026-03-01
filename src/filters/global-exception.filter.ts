@@ -42,9 +42,8 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     // 🔥 Логируем ТОЛЬКО 5xx ошибки
     if (status >= 500) {
       try {
-        await this.prisma.errorLog.create({
+        await this.prisma.errorOrders.create({
           data: {
-            service: 'orders-service',
             errorType,
             errorMessage,
             stackTrace,

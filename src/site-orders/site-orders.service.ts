@@ -14,7 +14,7 @@ export class SiteOrdersService {
   }
 
   async findAll(query: QuerySiteOrdersDto) {
-    const { status, city, search, page = 1, limit = 50 } = query;
+    const { status, cityId, search, page = 1, limit = 50 } = query;
     const skip = (page - 1) * limit;
 
     const where: any = {};
@@ -23,8 +23,8 @@ export class SiteOrdersService {
       where.status = status;
     }
 
-    if (city) {
-      where.city = city;
+    if (cityId) {
+      where.cityId = cityId;
     }
 
     if (search) {
