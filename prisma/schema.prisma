@@ -310,6 +310,54 @@ model SiteOrder {
 }
 
 // ─────────────────────────────────────────
+// Schema: orders_service — Appeal (обращения)
+// ─────────────────────────────────────────
+
+enum AppealStatus {
+  new
+  in_progress
+  waiting_client
+  closed_resolved
+  closed_refused
+
+  @@schema("orders_service")
+}
+
+enum AppealCategory {
+  question
+  complaint
+  order
+  consultation
+  callback
+
+  @@schema("orders_service")
+}
+
+model Appeal {
+  id          Int             @id @default(autoincrement())
+  clientPhone String          @map("client_phone") @db.VarChar(20)
+  clientName  String?         @map("client_name") @db.VarChar(100)
+  category    AppealCategory  @default(question)
+  description String          @db.Text
+  result      String?         @db.Text
+  status      AppealStatus    @default(new)
+  callId      Int?            @map("call_id")
+  siteOrderId Int?            @map("site_order_id")
+  orderId     Int?            @map("order_id")
+  operatorId  Int?            @map("operator_id")
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@index([clientPhone])
+  @@index([operatorId])
+  @@index([createdAt])
+  @@index([status, createdAt])
+  @@schema("orders_service")
+  @@map("appeals")
+}
+
+// ─────────────────────────────────────────
 // Schema: audit_logs
 // ─────────────────────────────────────────
 

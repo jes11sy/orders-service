@@ -6,6 +6,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { OrdersModule } from './orders/orders.module';
 import { SiteOrdersModule } from './site-orders/site-orders.module';
 import { ReferencesModule } from './references/references.module';
+import { AppealsModule } from './appeals/appeals.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { NotificationsModule } from './notifications/notifications.module';
@@ -42,6 +43,7 @@ import { RequestLoggerMiddleware } from './middleware/request-logger.middleware'
     OrdersModule,
     SiteOrdersModule,
     ReferencesModule,
+    AppealsModule,
     NotificationsModule,
     AuditModule,
   ],
