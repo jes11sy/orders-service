@@ -24,6 +24,11 @@ export class CreateAppealDto {
   description?: string;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  status?: string;
+
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
@@ -75,7 +80,8 @@ export class UpdateAppealDto {
 
   @IsOptional()
   @IsString()
-  result?: string;
+  @MaxLength(50)
+  status?: string;
 
   @IsOptional()
   @Type(() => Number)
@@ -128,6 +134,18 @@ export class QueryAppealsDto {
   @IsOptional()
   @IsString()
   dateTo?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => parseInt(value) || undefined)
+  @IsInt()
+  @Min(1)
+  cityId?: number;
+
+  @IsOptional()
+  @Transform(({ value }) => parseInt(value) || undefined)
+  @IsInt()
+  @Min(1)
+  operatorId?: number;
 
   @IsOptional()
   @Transform(({ value }) => parseInt(value) || 1)

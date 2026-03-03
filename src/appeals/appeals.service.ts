@@ -34,7 +34,7 @@ export class AppealsService implements OnModuleInit {
   }
 
   async getAppeals(query: QueryAppealsDto, operatorId?: number, role?: string) {
-    const { status, search, dateFrom, dateTo, page = 1, limit = 50 } = query;
+    const { status, search, dateFrom, dateTo, cityId, operatorId: qOperatorId, page = 1, limit = 50 } = query;
 
     const where: Record<string, unknown> = {
       statusId: { in: this.appealStatusIds },
@@ -42,6 +42,14 @@ export class AppealsService implements OnModuleInit {
 
     if (role === 'operator' && operatorId) {
       where.operatorId = operatorId;
+    }
+
+    if (qOperatorId) {
+      where.operatorId = qOperatorId;
+    }
+
+    if (cityId) {
+      where.cityId = cityId;
     }
 
     if (status) {
@@ -154,6 +162,10 @@ export class AppealsService implements OnModuleInit {
 
   async createAppeal(dto: CreateAppealDto, operatorId: number) {
     let statusId = dto.statusId;
+    if (!statusId && dto.status) {
+      await this.loadAppealStatuses();
+      statusId = this.getStatusId(dto.status);
+    }
     if (!statusId) {
       await this.loadAppealStatuses();
       statusId = this.getStatusId('new');
@@ -193,8 +205,13 @@ export class AppealsService implements OnModuleInit {
     if (dto.phone !== undefined) updateData.phone = dto.phone;
     if (dto.clientName !== undefined) updateData.clientName = dto.clientName;
     if (dto.description !== undefined) updateData.description = dto.description;
-    if (dto.result !== undefined) updateData.result = dto.result;
-    if (dto.statusId !== undefined) updateData.statusId = dto.statusId;
+    if (dto.statusId !== undefined) {
+      updateData.statusId = dto.statusId;
+    } else if (dto.status !== undefined) {
+      await this.loadAppealStatuses();
+      const resolved = this.getStatusId(dto.status);
+      if (resolved) updateData.statusId = resolved;
+    }
     if (dto.callId !== undefined) updateData.callId = dto.callId;
     if (dto.siteOrderId !== undefined) updateData.siteOrderId = dto.siteOrderId;
     if (dto.cityId !== undefined) updateData.cityId = dto.cityId;
