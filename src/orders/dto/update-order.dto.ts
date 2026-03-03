@@ -166,13 +166,48 @@ export class UpdateOrderDto {
   @IsOptional()
   dateCloseMod?: string;
 
-  // Дополнительные поля
+  @ApiProperty({ required: false, description: 'Примечание (описание обращения)' })
+  @IsString()
+  @IsOptional()
+  description?: string;
+
+  @ApiProperty({ required: false, description: 'Источник' })
+  @IsString()
+  @IsOptional()
+  @MaxLength(255)
+  source?: string;
+
+  @ApiProperty({ required: false, description: 'ID заявки с сайта' })
+  @Type(() => Number)
+  @IsNumber()
+  @IsOptional()
+  @Min(1)
+  siteOrderId?: number;
+
   @ApiProperty({ required: false, description: 'Комментарий' })
   @IsString()
   @IsOptional()
   @MaxLength(2000)
   @Matches(/^[^<>]*$/, { message: 'HTML теги не разрешены' })
   comment?: string;
+
+  // Контроль качества
+  @ApiProperty({ required: false, description: 'Статус проверки КК', enum: ['not_checked', 'checked', 'no_answer', 'discrepancy'] })
+  @IsString()
+  @IsOptional()
+  @MaxLength(50)
+  qaStatus?: string;
+
+  @ApiProperty({ required: false, description: 'Подтверждение суммы КК' })
+  @IsOptional()
+  @IsBoolean()
+  qaAmountConfirmed?: boolean;
+
+  @ApiProperty({ required: false, description: 'Примечание КК' })
+  @IsString()
+  @IsOptional()
+  @MaxLength(2000)
+  qaNote?: string;
 
   // Касса (хранится в cash_submissions)
   @ApiProperty({ required: false, description: 'Статус подачи кассы' })

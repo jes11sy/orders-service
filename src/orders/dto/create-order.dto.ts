@@ -24,44 +24,44 @@ export class CreateOrderDto {
   @MaxLength(15)
   phone: string;
 
-  @ApiProperty({ description: 'ID типа заказа' })
+  @ApiProperty({ required: false, description: 'ID типа заказа' })
   @Type(() => Number)
   @IsNumber()
-  @IsNotEmpty()
+  @IsOptional()
   @Min(1)
-  orderTypeId: number;
+  orderTypeId?: number;
 
   @ApiProperty({ description: 'Имя клиента' })
   @IsString()
-  @IsNotEmpty()
+  @IsOptional()
   @MaxLength(200)
   @Matches(/^[^<>]*$/, { message: 'HTML теги не разрешены' })
-  clientName: string;
+  clientName?: string;
 
-  @ApiProperty({ description: 'Адрес' })
+  @ApiProperty({ required: false, description: 'Адрес' })
   @IsString()
-  @IsNotEmpty()
+  @IsOptional()
   @MaxLength(500)
   @Matches(/^[^<>]*$/, { message: 'HTML теги не разрешены' })
-  address: string;
+  address?: string;
 
-  @ApiProperty({ description: 'Дата встречи' })
+  @ApiProperty({ required: false, description: 'Дата встречи' })
   @IsDateString()
-  @IsNotEmpty()
-  dateMeeting: string;
+  @IsOptional()
+  dateMeeting?: string;
 
-  @ApiProperty({ description: 'ID типа оборудования' })
+  @ApiProperty({ required: false, description: 'ID типа оборудования' })
   @Type(() => Number)
   @IsNumber()
-  @IsNotEmpty()
+  @IsOptional()
   @Min(1)
-  equipmentTypeId: number;
+  equipmentTypeId?: number;
 
-  @ApiProperty({ description: 'Описание проблемы' })
+  @ApiProperty({ required: false, description: 'Описание проблемы' })
   @IsString()
-  @IsNotEmpty()
+  @IsOptional()
   @MaxLength(2000)
-  problem: string;
+  problem?: string;
 
   @ApiProperty({ description: 'ID оператора' })
   @Type(() => Number)
@@ -82,4 +82,15 @@ export class CreateOrderDto {
   @MaxLength(2000)
   @Matches(/^[^<>]*$/, { message: 'HTML теги не разрешены' })
   comment?: string;
+
+  @ApiProperty({ required: false, description: 'Примечание (описание обращения)' })
+  @IsString()
+  @IsOptional()
+  description?: string;
+
+  @ApiProperty({ required: false, description: 'Источник' })
+  @IsString()
+  @IsOptional()
+  @MaxLength(255)
+  source?: string;
 }

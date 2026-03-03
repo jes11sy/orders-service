@@ -2,23 +2,21 @@ import {
   IsString,
   IsNotEmpty,
   IsOptional,
-  IsEnum,
   IsInt,
   MaxLength,
   Min,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
-import { AppealStatus } from '@prisma/client';
 
 export class CreateAppealDto {
   @IsString()
   @IsNotEmpty({ message: 'Телефон клиента обязателен' })
   @MaxLength(20)
-  clientPhone: string;
+  phone: string;
 
   @IsOptional()
   @IsString()
-  @MaxLength(100)
+  @MaxLength(255)
   clientName?: string;
 
   @IsOptional()
@@ -26,30 +24,21 @@ export class CreateAppealDto {
   description?: string;
 
   @IsOptional()
-  @IsString()
-  result?: string;
-
-  @IsOptional()
-  @IsEnum(AppealStatus, { message: 'Неверный статус' })
-  status?: AppealStatus;
-
-  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  callId?: number;
+  statusId?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  callId?: string;
 
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
   siteOrderId?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  orderId?: number;
 
   @IsOptional()
   @Type(() => Number)
@@ -73,11 +62,11 @@ export class UpdateAppealDto {
   @IsOptional()
   @IsString()
   @MaxLength(20)
-  clientPhone?: string;
+  phone?: string;
 
   @IsOptional()
   @IsString()
-  @MaxLength(100)
+  @MaxLength(255)
   clientName?: string;
 
   @IsOptional()
@@ -89,26 +78,21 @@ export class UpdateAppealDto {
   result?: string;
 
   @IsOptional()
-  @IsEnum(AppealStatus)
-  status?: AppealStatus;
-
-  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  callId?: number;
+  statusId?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  callId?: string;
 
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
   siteOrderId?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  orderId?: number;
 
   @IsOptional()
   @Type(() => Number)
@@ -130,8 +114,8 @@ export class UpdateAppealDto {
 
 export class QueryAppealsDto {
   @IsOptional()
-  @IsEnum(AppealStatus)
-  status?: AppealStatus;
+  @IsString()
+  status?: string;
 
   @IsOptional()
   @IsString()

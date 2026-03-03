@@ -19,25 +19,25 @@ export class CreateOrderFromCallDto {
   @Min(1)
   cityId: number;
 
-  @ApiProperty({ description: 'ID типа заказа' })
+  @ApiProperty({ required: false, description: 'ID типа заказа' })
   @Type(() => Number)
   @IsNumber()
-  @IsNotEmpty()
+  @IsOptional()
   @Min(1)
-  orderTypeId: number;
+  orderTypeId?: number;
 
-  @ApiProperty() @IsString() @IsNotEmpty() clientName: string;
-  @ApiProperty() @IsString() @IsNotEmpty() address: string;
-  @ApiProperty() @IsDateString() @IsNotEmpty() dateMeeting: string;
+  @ApiProperty({ required: false }) @IsString() @IsOptional() clientName?: string;
+  @ApiProperty({ required: false }) @IsString() @IsOptional() address?: string;
+  @ApiProperty({ required: false }) @IsDateString() @IsOptional() dateMeeting?: string;
 
-  @ApiProperty({ description: 'ID типа оборудования' })
+  @ApiProperty({ required: false, description: 'ID типа оборудования' })
   @Type(() => Number)
   @IsNumber()
-  @IsNotEmpty()
+  @IsOptional()
   @Min(1)
-  equipmentTypeId: number;
+  equipmentTypeId?: number;
 
-  @ApiProperty() @IsString() @IsNotEmpty() problem: string;
+  @ApiProperty({ required: false }) @IsString() @IsOptional() problem?: string;
 
   @ApiProperty({ description: 'ID оператора' })
   @Type(() => Number)
@@ -45,4 +45,7 @@ export class CreateOrderFromCallDto {
   @IsNotEmpty()
   @Transform(({ value }) => parseInt(value))
   operatorId: number;
+
+  @ApiProperty({ required: false }) @IsString() @IsOptional() description?: string;
+  @ApiProperty({ required: false }) @IsString() @IsOptional() source?: string;
 }

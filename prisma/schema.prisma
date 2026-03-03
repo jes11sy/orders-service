@@ -67,6 +67,7 @@ model OrderStatus {
   color     String? @db.VarChar(20)
   sortOrder Int     @default(0) @map("sort_order")
   isActive  Boolean @default(true) @map("is_active")
+  group     String  @default("order") @db.VarChar(20)
 
   orders Order[]
 
@@ -131,18 +132,18 @@ model Call {
 // Schema: orders_service
 // ─────────────────────────────────────────
 
-/// Заказы (основная бизнес-сущность)
+/// Заказы и обращения (единая сущность)
 model Order {
   id              Int       @id @default(autoincrement())
   cityId          Int       @map("city_id")
   rkId            Int       @map("rk_id")
   phone           String    @db.VarChar(20)
-  orderTypeId     Int       @map("order_type_id")
-  clientName      String    @map("client_name") @db.VarChar(255)
-  address         String    @db.Text
-  dateMeeting     DateTime  @map("date_meeting")
-  equipmentTypeId Int       @map("equipment_type_id")
-  problem         String    @db.Text
+  orderTypeId     Int?      @map("order_type_id")
+  clientName      String    @default("") @map("client_name") @db.VarChar(255)
+  address         String?   @db.Text
+  dateMeeting     DateTime? @map("date_meeting")
+  equipmentTypeId Int?      @map("equipment_type_id")
+  problem         String?   @db.Text
   statusId        Int       @map("status_id")
   operatorId      Int       @map("operator_id")
   masterId        Int?      @map("master_id")
@@ -152,21 +153,26 @@ model Order {
   masterChange    Decimal?  @map("master_change") @db.Decimal(10, 2)
   prepayment      Decimal?  @db.Decimal(10, 2)
   callId          String?   @map("call_id") @db.VarChar(100)
-  appealId        Int?      @map("appeal_id")
+  description     String    @default("") @db.Text
+  source          String?   @db.VarChar(255)
+  siteOrderId     Int?      @map("site_order_id")
   dateCloseMod    DateTime? @map("date_close_mod")
   closingAt       DateTime? @map("closing_at")
+  qaStatus          String?   @map("qa_status") @db.VarChar(50)
+  qaAmountConfirmed Boolean?  @map("qa_amount_confirmed")
+  qaNote            String?   @map("qa_note") @db.Text
   version         Int       @default(1)
   hasPoverka      Boolean   @default(false) @map("has_poverka")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
-  city          City          @relation(fields: [cityId], references: [id])
-  rk            Rk            @relation(fields: [rkId], references: [id])
-  orderType     OrderType     @relation(fields: [orderTypeId], references: [id])
-  equipmentType EquipmentType @relation(fields: [equipmentTypeId], references: [id])
-  status        OrderStatus   @relation(fields: [statusId], references: [id])
-  operator      Operator      @relation(fields: [operatorId], references: [id])
-  master        Master?       @relation(fields: [masterId], references: [id])
+  city          City           @relation(fields: [cityId], references: [id])
+  rk            Rk             @relation(fields: [rkId], references: [id])
+  orderType     OrderType?     @relation(fields: [orderTypeId], references: [id])
+  equipmentType EquipmentType? @relation(fields: [equipmentTypeId], references: [id])
+  status        OrderStatus    @relation(fields: [statusId], references: [id])
+  operator      Operator       @relation(fields: [operatorId], references: [id])
+  master        Master?        @relation(fields: [masterId], references: [id])
   comments      OrderComment[]
   documents     OrderDocument[]
   cashSubmission CashSubmission?
@@ -188,10 +194,12 @@ model Order {
   @@index([masterId, statusId])
   @@index([operatorId, createdAt])
   @@index([cityId, statusId, dateMeeting])
-  @@index([appealId])
   @@index([statusId, createdAt])
   @@index([cityId, masterId])
   @@index([cityId, operatorId])
+  @@index([source])
+  @@index([siteOrderId])
+  @@index([qaStatus])
   @@schema("orders_service")
   @@map("orders")
 }
@@ -309,50 +317,7 @@ model SiteOrder {
   @@map("site_orders")
 }
 
-// ─────────────────────────────────────────
-// Schema: orders_service — Appeal (обращения)
-// ─────────────────────────────────────────
-
-enum AppealStatus {
-  new
-  accepted
-  refused
-  spam
-  non_order
-  duplicate
-  callback
-  complaint
-  consultation
-
-  @@schema("orders_service")
-}
-
-model Appeal {
-  id          Int             @id @default(autoincrement())
-  clientPhone String          @map("client_phone") @db.VarChar(20)
-  clientName  String?         @map("client_name") @db.VarChar(100)
-  description String          @default("") @db.Text
-  result      String?         @db.Text
-  status      AppealStatus    @default(new)
-  callId      Int?            @map("call_id")
-  siteOrderId Int?            @map("site_order_id")
-  orderId     Int?            @map("order_id")
-  operatorId  Int?            @map("operator_id")
-  cityId      Int?            @map("city_id")
-  rkId        Int?            @map("rk_id")
-  source      String?         @db.VarChar(255)
-  createdAt   DateTime        @default(now()) @map("created_at")
-  updatedAt   DateTime        @updatedAt @map("updated_at")
-
-  @@index([status])
-  @@index([clientPhone])
-  @@index([operatorId])
-  @@index([cityId])
-  @@index([createdAt])
-  @@index([status, createdAt])
-  @@schema("orders_service")
-  @@map("appeals")
-}
+// Appeal model removed — merged into Order
 
 // ─────────────────────────────────────────
 // Schema: audit_logs

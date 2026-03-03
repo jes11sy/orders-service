@@ -48,6 +48,13 @@ export class AppealsController {
     return this.appealsService.getStats(req.user.userId, req.user.role);
   }
 
+  @Get('statuses')
+  @Roles(UserRole.ADMIN, UserRole.DIRECTOR, UserRole.OPERATOR)
+  @ApiOperation({ summary: 'Список статусов обращений' })
+  getStatuses() {
+    return this.appealsService.getAppealStatuses();
+  }
+
   @Get(':id')
   @Roles(UserRole.ADMIN, UserRole.DIRECTOR, UserRole.OPERATOR)
   @ApiOperation({ summary: 'Получить обращение по ID' })
