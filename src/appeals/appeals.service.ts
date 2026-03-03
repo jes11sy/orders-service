@@ -64,8 +64,8 @@ export class AppealsService {
       rkIds.length > 0 ? this.prisma.rk.findMany({ where: { id: { in: rkIds } }, select: { id: true, name: true } }) : [],
     ]);
 
-    const cityMap = new Map(cities.map(c => [c.id, c.name]));
-    const rkMap = new Map(rks.map(r => [r.id, r.name]));
+    const cityMap = new Map(cities.map(c => [c.id, c.name] as [number, string]));
+    const rkMap = new Map(rks.map(r => [r.id, r.name] as [number, string]));
 
     const enriched = data.map(appeal => ({
       ...appeal,
