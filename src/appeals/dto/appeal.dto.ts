@@ -8,7 +8,7 @@ import {
   Min,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
-import { AppealStatus, AppealCategory } from '@prisma/client';
+import { AppealStatus } from '@prisma/client';
 
 export class CreateAppealDto {
   @IsString()
@@ -21,12 +21,9 @@ export class CreateAppealDto {
   @MaxLength(100)
   clientName?: string;
 
-  @IsEnum(AppealCategory, { message: 'Неверная категория' })
-  category: AppealCategory;
-
+  @IsOptional()
   @IsString()
-  @IsNotEmpty({ message: 'Описание обращения обязательно' })
-  description: string;
+  description?: string;
 
   @IsOptional()
   @IsString()
@@ -53,6 +50,23 @@ export class CreateAppealDto {
   @IsInt()
   @Min(1)
   orderId?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  cityId?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  rkId?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  source?: string;
 }
 
 export class UpdateAppealDto {
@@ -65,10 +79,6 @@ export class UpdateAppealDto {
   @IsString()
   @MaxLength(100)
   clientName?: string;
-
-  @IsOptional()
-  @IsEnum(AppealCategory)
-  category?: AppealCategory;
 
   @IsOptional()
   @IsString()
@@ -99,16 +109,29 @@ export class UpdateAppealDto {
   @IsInt()
   @Min(1)
   orderId?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  cityId?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  rkId?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  source?: string;
 }
 
 export class QueryAppealsDto {
   @IsOptional()
   @IsEnum(AppealStatus)
   status?: AppealStatus;
-
-  @IsOptional()
-  @IsEnum(AppealCategory)
-  category?: AppealCategory;
 
   @IsOptional()
   @IsString()

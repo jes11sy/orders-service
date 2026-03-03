@@ -41,6 +41,7 @@ export class SiteOrdersService {
         orderBy: { createdAt: 'desc' },
         skip,
         take: limit,
+        include: { city: { select: { id: true, name: true } } },
       }),
       this.prisma.siteOrder.count({ where }),
     ]);
@@ -59,6 +60,7 @@ export class SiteOrdersService {
   async findOne(id: number) {
     const siteOrder = await this.prisma.siteOrder.findUnique({
       where: { id },
+      include: { city: { select: { id: true, name: true } } },
     });
 
     if (!siteOrder) {
@@ -87,13 +89,15 @@ export class SiteOrdersService {
     });
   }
 
-  async updateStatus(id: number, status: string) {
-    // Проверяем существование
+  async updateStatus(id: number, status: string, callbackAt?: string) {
     await this.findOne(id);
 
     return this.prisma.siteOrder.update({
       where: { id },
-      data: { status },
+      data: {
+        status,
+        callbackAt: status === 'Перезвонить' && callbackAt ? new Date(callbackAt) : null,
+      },
     });
   }
 

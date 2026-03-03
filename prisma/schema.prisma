@@ -315,20 +315,14 @@ model SiteOrder {
 
 enum AppealStatus {
   new
-  in_progress
-  waiting_client
-  closed_resolved
-  closed_refused
-
-  @@schema("orders_service")
-}
-
-enum AppealCategory {
-  question
-  complaint
-  order
-  consultation
+  accepted
+  refused
+  spam
+  non_order
+  duplicate
   callback
+  complaint
+  consultation
 
   @@schema("orders_service")
 }
@@ -337,20 +331,23 @@ model Appeal {
   id          Int             @id @default(autoincrement())
   clientPhone String          @map("client_phone") @db.VarChar(20)
   clientName  String?         @map("client_name") @db.VarChar(100)
-  category    AppealCategory  @default(question)
-  description String          @db.Text
+  description String          @default("") @db.Text
   result      String?         @db.Text
   status      AppealStatus    @default(new)
   callId      Int?            @map("call_id")
   siteOrderId Int?            @map("site_order_id")
   orderId     Int?            @map("order_id")
   operatorId  Int?            @map("operator_id")
+  cityId      Int?            @map("city_id")
+  rkId        Int?            @map("rk_id")
+  source      String?         @db.VarChar(255)
   createdAt   DateTime        @default(now()) @map("created_at")
   updatedAt   DateTime        @updatedAt @map("updated_at")
 
   @@index([status])
   @@index([clientPhone])
   @@index([operatorId])
+  @@index([cityId])
   @@index([createdAt])
   @@index([status, createdAt])
   @@schema("orders_service")

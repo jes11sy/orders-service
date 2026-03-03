@@ -76,8 +76,9 @@ export class SiteOrdersController {
   updateStatus(
     @Param('id', ParseIntPipe) id: number,
     @Body('status') status: string,
+    @Body('callbackAt') callbackAt?: string,
   ) {
-    return this.siteOrdersService.updateStatus(id, status);
+    return this.siteOrdersService.updateStatus(id, status, callbackAt);
   }
 
   @Patch(':id/link-order')

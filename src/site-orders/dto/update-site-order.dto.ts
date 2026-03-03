@@ -1,4 +1,6 @@
-import { IsString, IsOptional, MaxLength, IsIn, IsInt } from 'class-validator';
+import { IsString, IsOptional, MaxLength, IsIn, IsInt, IsDateString } from 'class-validator';
+
+const SITE_ORDER_STATUSES = ['Создан', 'В обработке', 'Перезвонить', 'Не отвечает', 'Отказ', 'Заказ создан'] as const;
 
 export class UpdateSiteOrderDto {
   @IsOptional()
@@ -22,7 +24,7 @@ export class UpdateSiteOrderDto {
 
   @IsOptional()
   @IsString()
-  @IsIn(['Создан', 'Не отвечает', 'Отказ'])
+  @IsIn(SITE_ORDER_STATUSES)
   status?: string;
 
   @IsOptional()
@@ -36,4 +38,8 @@ export class UpdateSiteOrderDto {
   @IsOptional()
   @IsInt()
   orderId?: number;
+
+  @IsOptional()
+  @IsDateString()
+  callbackAt?: string;
 }

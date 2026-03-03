@@ -11,7 +11,6 @@ export class AppealsService {
   async getAppeals(query: QueryAppealsDto, operatorId?: number, role?: string) {
     const {
       status,
-      category,
       search,
       dateFrom,
       dateTo,
@@ -21,13 +20,11 @@ export class AppealsService {
 
     const where: Record<string, unknown> = {};
 
-    // Операторы видят только свои обращения, директора/admins — все
     if (role === 'operator' && operatorId) {
       where.operatorId = operatorId;
     }
 
     if (status) where.status = status;
-    if (category) where.category = category;
 
     if (search) {
       where.OR = [
@@ -59,9 +56,26 @@ export class AppealsService {
       this.prisma.appeal.count({ where }),
     ]);
 
+    const cityIds = [...new Set(data.map(a => a.cityId).filter(Boolean))] as number[];
+    const rkIds = [...new Set(data.map(a => a.rkId).filter(Boolean))] as number[];
+
+    const [cities, rks] = await Promise.all([
+      cityIds.length > 0 ? this.prisma.city.findMany({ where: { id: { in: cityIds } }, select: { id: true, name: true } }) : [],
+      rkIds.length > 0 ? this.prisma.rk.findMany({ where: { id: { in: rkIds } }, select: { id: true, name: true } }) : [],
+    ]);
+
+    const cityMap = new Map(cities.map(c => [c.id, c.name]));
+    const rkMap = new Map(rks.map(r => [r.id, r.name]));
+
+    const enriched = data.map(appeal => ({
+      ...appeal,
+      cityName: appeal.cityId ? cityMap.get(appeal.cityId) ?? null : null,
+      rkName: appeal.rkId ? rkMap.get(appeal.rkId) ?? null : null,
+    }));
+
     return {
       success: true,
-      data,
+      data: enriched,
       pagination: {
         total,
         page,
@@ -73,7 +87,20 @@ export class AppealsService {
 
   async getAppealById(id: number) {
     const appeal = await this.findOrFail(id);
-    return { success: true, data: appeal };
+
+    const [city, rk] = await Promise.all([
+      appeal.cityId ? this.prisma.city.findUnique({ where: { id: appeal.cityId }, select: { id: true, name: true } }) : null,
+      appeal.rkId ? this.prisma.rk.findUnique({ where: { id: appeal.rkId }, select: { id: true, name: true } }) : null,
+    ]);
+
+    return {
+      success: true,
+      data: {
+        ...appeal,
+        cityName: city?.name ?? null,
+        rkName: rk?.name ?? null,
+      },
+    };
   }
 
   async createAppeal(dto: CreateAppealDto, operatorId: number) {
@@ -81,19 +108,21 @@ export class AppealsService {
       data: {
         clientPhone: dto.clientPhone,
         clientName: dto.clientName,
-        category: dto.category,
-        description: dto.description,
+        description: dto.description ?? '',
         result: dto.result,
         status: dto.status ?? 'new',
         callId: dto.callId,
         siteOrderId: dto.siteOrderId,
         orderId: dto.orderId,
         operatorId,
+        cityId: dto.cityId,
+        rkId: dto.rkId,
+        source: dto.source,
       },
     });
 
     this.logger.log(
-      `Appeal #${appeal.id} created by operator #${operatorId} — ${appeal.clientPhone} [${appeal.category}]`,
+      `Appeal #${appeal.id} created by operator #${operatorId} — ${appeal.clientPhone}`,
     );
 
     return { success: true, data: appeal };
@@ -107,13 +136,15 @@ export class AppealsService {
       data: {
         ...(dto.clientPhone !== undefined && { clientPhone: dto.clientPhone }),
         ...(dto.clientName !== undefined && { clientName: dto.clientName }),
-        ...(dto.category !== undefined && { category: dto.category }),
         ...(dto.description !== undefined && { description: dto.description }),
         ...(dto.result !== undefined && { result: dto.result }),
         ...(dto.status !== undefined && { status: dto.status }),
         ...(dto.callId !== undefined && { callId: dto.callId }),
         ...(dto.siteOrderId !== undefined && { siteOrderId: dto.siteOrderId }),
         ...(dto.orderId !== undefined && { orderId: dto.orderId }),
+        ...(dto.cityId !== undefined && { cityId: dto.cityId }),
+        ...(dto.rkId !== undefined && { rkId: dto.rkId }),
+        ...(dto.source !== undefined && { source: dto.source }),
       },
     });
 
@@ -134,17 +165,12 @@ export class AppealsService {
       where.operatorId = operatorId;
     }
 
-    const [total, byStatus, byCategory] = await Promise.all([
+    const [total, byStatus] = await Promise.all([
       this.prisma.appeal.count({ where }),
       this.prisma.appeal.groupBy({
         by: ['status'],
         where,
         _count: { status: true },
-      }),
-      this.prisma.appeal.groupBy({
-        by: ['category'],
-        where,
-        _count: { category: true },
       }),
     ]);
 
@@ -153,7 +179,6 @@ export class AppealsService {
       data: {
         total,
         byStatus: Object.fromEntries(byStatus.map((r) => [r.status, r._count.status])),
-        byCategory: Object.fromEntries(byCategory.map((r) => [r.category, r._count.category])),
       },
     };
   }
