@@ -254,7 +254,7 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
           o.master_change   AS "masterChange",
           o.prepayment,
           o.call_id         AS "callId",
-          o.description,
+          COALESCE(o.problem, '') AS description,
           o.source,
           o.site_order_id   AS "siteOrderId",
           o.qa_status       AS "qaStatus",
