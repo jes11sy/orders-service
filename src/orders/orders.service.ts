@@ -254,15 +254,13 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
           o.master_change   AS "masterChange",
           o.prepayment,
           o.call_id         AS "callId",
-          COALESCE(o.problem, '') AS description,
-          NULL::text AS source,
-          NULL::integer     AS "siteOrderId",
-          NULL::text        AS "qaStatus",
-          NULL::boolean     AS "qaAmountConfirmed",
-          NULL::text        AS "qaNote",
-          NULL::timestamp   AS "dateCloseMod",
+          a.description     AS description,
+          a.source_type     AS source,
+          a.site_order_id   AS "siteOrderId",
+          o.appeal_id       AS "appealId",
+          o.date_close_mod  AS "dateCloseMod",
           o.closing_at      AS "closingAt",
-          NULL::boolean     AS "hasPoverka",
+          o.has_poverka     AS "hasPoverka",
           o.created_at      AS "createdAt",
           o.updated_at      AS "updatedAt",
           json_build_object('id', op.id, 'name', op.name, 'login', op.login) AS operator,
@@ -294,11 +292,12 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
             '[]'::json
           ) AS comments
         FROM orders_service.orders o
+        LEFT JOIN calls_service.appeals a ON a.id = o.appeal_id
         JOIN references_service.order_statuses os ON os.id = o.status_id
         JOIN references_service.cities c ON c.id = o.city_id
         JOIN references_service.rk rkt ON rkt.id = o.rk_id
-        JOIN references_service.order_types ot ON ot.id = o.order_type_id
-        JOIN references_service.equipment_types et ON et.id = o.equipment_type_id
+        LEFT JOIN references_service.order_types ot ON ot.id = o.order_type_id
+        LEFT JOIN references_service.equipment_types et ON et.id = o.equipment_type_id
         LEFT JOIN auth_service.operators op ON op.id = o.operator_id
         LEFT JOIN auth_service.masters m ON m.id = o.master_id
         ${whereClause}
@@ -394,8 +393,6 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
           statusId: waitingStatusId || 1,
           operatorId: dto.operatorId,
           callId: dto.callId,
-          description: dto.description ?? '',
-          source: dto.source ?? null,
         },
         include: {
           city: true,
@@ -749,12 +746,6 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
       if (dto.problem !== undefined) updateData.problem = dto.problem;
       if (dto.callId !== undefined) updateData.callId = dto.callId;
       if (dto.operatorId !== undefined) updateData.operatorId = dto.operatorId;
-      if (dto.description !== undefined) updateData.description = dto.description;
-      if (dto.source !== undefined) updateData.source = dto.source;
-      if (dto.siteOrderId !== undefined) updateData.siteOrderId = dto.siteOrderId;
-      if (dto.qaStatus !== undefined) updateData.qaStatus = dto.qaStatus;
-      if (dto.qaAmountConfirmed !== undefined) updateData.qaAmountConfirmed = dto.qaAmountConfirmed;
-      if (dto.qaNote !== undefined) updateData.qaNote = dto.qaNote;
 
       if (dto.statusId !== undefined) {
         updateData.statusId = dto.statusId;
@@ -1648,28 +1639,14 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
           { phone: { contains: phone } },
         ],
       },
-      select: {
-        id: true,
-        phone: true,
-        clientName: true,
-        description: true,
-        source: true,
-        cityId: true,
+      include: {
         city: { select: { name: true } },
-        statusId: true,
         status: { select: { name: true, code: true, color: true } },
-        dateMeeting: true,
-        equipmentTypeId: true,
         equipmentType: { select: { name: true } },
-        orderTypeId: true,
         orderType: { select: { name: true } },
-        problem: true,
-        createdAt: true,
-        rkId: true,
         rk: { select: { name: true } },
-        address: true,
-        result: true,
         master: { select: { id: true, name: true } },
+        appeal: { select: { description: true, sourceType: true, siteOrderId: true } },
       },
       orderBy: { createdAt: 'desc' },
       take: 30,
@@ -1681,8 +1658,9 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
         id: order.id,
         phone: order.phone,
         clientName: order.clientName,
-        description: order.description,
-        source: order.source,
+        description: order.appeal?.description ?? null,
+        source: order.appeal?.sourceType ?? null,
+        siteOrderId: order.appeal?.siteOrderId ?? null,
         cityId: order.cityId,
         cityName: order.city?.name,
         statusId: order.statusId,

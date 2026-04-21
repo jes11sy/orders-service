@@ -5,9 +5,7 @@ import { CreateAppealDto, UpdateAppealDto, QueryAppealsDto } from './dto/appeal.
 @Injectable()
 export class AppealsService implements OnModuleInit {
   private readonly logger = new Logger(AppealsService.name);
-  private appealStatusIds: number[] = [];
-  private statusCodeToId = new Map<string, number>();
-  private statusIdToCode = new Map<number, string>();
+  private statusMeta = new Map<string, { id: number; name: string; color: string | null }>();
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -19,26 +17,61 @@ export class AppealsService implements OnModuleInit {
     const statuses = await this.prisma.orderStatus.findMany({
       where: { group: 'appeal', isActive: true },
     });
-    this.appealStatusIds = statuses.map(s => s.id);
-    this.statusCodeToId.clear();
-    this.statusIdToCode.clear();
+    this.statusMeta.clear();
     for (const s of statuses) {
-      this.statusCodeToId.set(s.code, s.id);
-      this.statusIdToCode.set(s.id, s.code);
+      this.statusMeta.set(s.code, { id: s.id, name: s.name, color: s.color });
     }
     this.logger.log(`Loaded ${statuses.length} appeal statuses: ${statuses.map(s => s.code).join(', ')}`);
   }
 
-  private getStatusId(code: string): number | undefined {
-    return this.statusCodeToId.get(code);
+  private getStatusMeta(code: string) {
+    return this.statusMeta.get(code);
+  }
+
+  private normalizeSourceType(source?: string, siteOrderId?: number, callId?: string) {
+    const allowed = new Set(['call', 'chat', 'site_order', 'manual']);
+    if (source && allowed.has(source)) return source;
+    if (siteOrderId) return 'site_order';
+    if (callId) return 'call';
+    return 'manual';
+  }
+
+  private normalizeCategory(status?: string) {
+    if (status === 'callback') return 'callback';
+    if (status === 'complaint') return 'complaint';
+    if (status === 'consultation') return 'consultation';
+    return 'order';
+  }
+
+  private toResponse(appeal: any) {
+    const meta = this.getStatusMeta(appeal.status);
+    return {
+      id: appeal.id,
+      phone: appeal.phone,
+      clientName: null,
+      description: appeal.description,
+      source: appeal.sourceType,
+      status: appeal.status,
+      statusName: meta?.name ?? appeal.status,
+      statusColor: meta?.color ?? null,
+      statusId: meta?.id ?? null,
+      callId: appeal.callId,
+      siteOrderId: appeal.siteOrderId,
+      operatorId: appeal.operatorId,
+      cityId: appeal.cityId,
+      cityName: null,
+      rkId: null,
+      rkName: null,
+      callbackAt: appeal.callbackAt,
+      createdAt: appeal.createdAt,
+      updatedAt: appeal.updatedAt,
+    };
   }
 
   async getAppeals(query: QueryAppealsDto, operatorId?: number, role?: string) {
     const { status, search, dateFrom, dateTo, cityId, operatorId: qOperatorId, page = 1, limit = 50 } = query;
 
-    const where: Record<string, unknown> = {
-      statusId: { in: this.appealStatusIds },
-    };
+    const where: Record<string, unknown> = {};
 
     if (role === 'operator' && operatorId) {
       where.operatorId = operatorId;
@@ -53,14 +86,12 @@ export class AppealsService implements OnModuleInit {
     }
 
     if (status) {
-      const sid = this.getStatusId(status);
-      if (sid) where.statusId = sid;
+      where.status = status;
     }
 
     if (search) {
       where.OR = [
         { phone: { contains: search, mode: 'insensitive' } },
-        { clientName: { contains: search, mode: 'insensitive' } },
         { description: { contains: search, mode: 'insensitive' } },
       ];
     }
@@ -78,187 +109,105 @@ export class AppealsService implements OnModuleInit {
     const skip = (page - 1) * limit;
 
     const [data, total] = await Promise.all([
-      this.prisma.order.findMany({
+      this.prisma.appeal.findMany({
         where,
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
-        include: {
-          status: { select: { id: true, code: true, name: true, color: true, group: true } },
-          city: { select: { id: true, name: true } },
-          rk: { select: { id: true, name: true } },
-          operator: { select: { id: true, name: true } },
-        },
       }),
-      this.prisma.order.count({ where }),
+      this.prisma.appeal.count({ where }),
     ]);
-
-    const enriched = data.map(order => ({
-      id: order.id,
-      phone: order.phone,
-      clientName: order.clientName,
-      description: order.description,
-      source: order.source,
-      status: order.status.code,
-      statusName: order.status.name,
-      statusColor: order.status.color,
-      statusId: order.statusId,
-      callId: order.callId,
-      siteOrderId: order.siteOrderId,
-      operatorId: order.operatorId,
-      operator: order.operator,
-      cityId: order.cityId,
-      cityName: order.city?.name ?? null,
-      rkId: order.rkId,
-      rkName: order.rk?.name ?? null,
-      createdAt: order.createdAt,
-      updatedAt: order.updatedAt,
-    }));
 
     return {
       success: true,
-      data: enriched,
+      data: data.map((appeal) => this.toResponse(appeal)),
       pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
   }
 
   async getAppealById(id: number) {
-    const order = await this.prisma.order.findUnique({
+    const appeal = await this.prisma.appeal.findUnique({
       where: { id },
-      include: {
-        status: { select: { id: true, code: true, name: true, color: true, group: true } },
-        city: { select: { id: true, name: true } },
-        rk: { select: { id: true, name: true } },
-        operator: { select: { id: true, name: true } },
-      },
     });
-    if (!order) throw new NotFoundException(`Обращение с ID ${id} не найдено`);
+    if (!appeal) throw new NotFoundException(`Обращение с ID ${id} не найдено`);
 
     return {
       success: true,
-      data: {
-        id: order.id,
-        phone: order.phone,
-        clientName: order.clientName,
-        description: order.description,
-        source: order.source,
-        status: order.status.code,
-        statusName: order.status.name,
-        statusColor: order.status.color,
-        statusId: order.statusId,
-        callId: order.callId,
-        siteOrderId: order.siteOrderId,
-        operatorId: order.operatorId,
-        operator: order.operator,
-        cityId: order.cityId,
-        cityName: order.city?.name ?? null,
-        rkId: order.rkId,
-        rkName: order.rk?.name ?? null,
-        createdAt: order.createdAt,
-        updatedAt: order.updatedAt,
-      },
+      data: this.toResponse(appeal),
     };
   }
 
   async createAppeal(dto: CreateAppealDto, operatorId: number) {
-    let statusId = dto.statusId;
-    if (!statusId && dto.status) {
-      await this.loadAppealStatuses();
-      statusId = this.getStatusId(dto.status);
-    }
-    if (!statusId) {
-      await this.loadAppealStatuses();
-      statusId = this.getStatusId('new');
-      if (!statusId) {
-        const newStatus = await this.prisma.orderStatus.findFirst({ where: { code: 'new' } });
-        statusId = newStatus?.id ?? 1;
-      }
-    }
-
-    const order = await this.prisma.order.create({
+    const appeal = await this.prisma.appeal.create({
       data: {
         phone: dto.phone,
-        clientName: dto.clientName ?? '',
-        description: dto.description ?? '',
-        source: dto.source,
-        statusId,
+        description: dto.description ?? null,
+        status: dto.status ?? 'new',
         operatorId,
         cityId: dto.cityId ?? 1,
-        rkId: dto.rkId ?? 1,
-        callId: dto.callId,
+        category: this.normalizeCategory(dto.status),
+        sourceType: this.normalizeSourceType(dto.source, dto.siteOrderId, dto.callId),
+        callId: dto.callId ? Number(dto.callId) || null : null,
         siteOrderId: dto.siteOrderId,
-      },
-      include: {
-        status: { select: { id: true, code: true, name: true, color: true } },
       },
     });
 
-    this.logger.log(`Appeal (order) #${order.id} created by operator #${operatorId} — ${order.phone}`);
-    return { success: true, data: order };
+    this.logger.log(`Appeal #${appeal.id} created by operator #${operatorId} — ${appeal.phone}`);
+    return { success: true, data: this.toResponse(appeal) };
   }
 
   async updateAppeal(id: number, dto: UpdateAppealDto) {
-    const existing = await this.prisma.order.findUnique({ where: { id } });
+    const existing = await this.prisma.appeal.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException(`Обращение с ID ${id} не найдено`);
 
     const updateData: Record<string, unknown> = {};
     if (dto.phone !== undefined) updateData.phone = dto.phone;
-    if (dto.clientName !== undefined) updateData.clientName = dto.clientName;
     if (dto.description !== undefined) updateData.description = dto.description;
-    if (dto.statusId !== undefined) {
-      updateData.statusId = dto.statusId;
-    } else if (dto.status !== undefined) {
-      await this.loadAppealStatuses();
-      const resolved = this.getStatusId(dto.status);
-      if (resolved) updateData.statusId = resolved;
+    if (dto.status !== undefined) {
+      updateData.status = dto.status;
+      updateData.category = this.normalizeCategory(dto.status);
     }
-    if (dto.callId !== undefined) updateData.callId = dto.callId;
+    if (dto.callId !== undefined) updateData.callId = dto.callId ? Number(dto.callId) || null : null;
     if (dto.siteOrderId !== undefined) updateData.siteOrderId = dto.siteOrderId;
     if (dto.cityId !== undefined) updateData.cityId = dto.cityId;
-    if (dto.rkId !== undefined) updateData.rkId = dto.rkId;
-    if (dto.source !== undefined) updateData.source = dto.source;
+    if (dto.source !== undefined) updateData.sourceType = this.normalizeSourceType(dto.source, dto.siteOrderId ?? existing.siteOrderId ?? undefined, dto.callId ?? String(existing.callId ?? ''));
 
-    const order = await this.prisma.order.update({
+    const appeal = await this.prisma.appeal.update({
       where: { id },
       data: updateData,
-      include: {
-        status: { select: { id: true, code: true, name: true, color: true } },
-      },
     });
 
-    this.logger.log(`Appeal (order) #${id} updated — statusId: ${order.statusId}`);
-    return { success: true, data: order };
+    this.logger.log(`Appeal #${id} updated — status=${appeal.status}`);
+    return { success: true, data: this.toResponse(appeal) };
   }
 
   async deleteAppeal(id: number) {
-    const existing = await this.prisma.order.findUnique({ where: { id } });
+    const existing = await this.prisma.appeal.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException(`Обращение с ID ${id} не найдено`);
-    await this.prisma.order.delete({ where: { id } });
-    this.logger.log(`Appeal (order) #${id} deleted`);
+    await this.prisma.appeal.delete({ where: { id } });
+    this.logger.log(`Appeal #${id} deleted`);
     return { success: true, message: 'Обращение удалено' };
   }
 
   async getStats(operatorId?: number, role?: string) {
     const where: Record<string, unknown> = {
-      statusId: { in: this.appealStatusIds },
     };
     if (role === 'operator' && operatorId) {
       where.operatorId = operatorId;
     }
 
     const [total, byStatus] = await Promise.all([
-      this.prisma.order.count({ where }),
-      this.prisma.order.groupBy({
-        by: ['statusId'],
+      this.prisma.appeal.count({ where }),
+      this.prisma.appeal.groupBy({
+        by: ['status'],
         where,
-        _count: { statusId: true },
+        _count: { status: true },
       }),
     ]);
 
     const byStatusCode: Record<string, number> = {};
     for (const row of byStatus) {
-      const code = this.statusIdToCode.get(row.statusId);
-      if (code) byStatusCode[code] = row._count.statusId;
+      byStatusCode[row.status] = row._count.status;
     }
 
     return {

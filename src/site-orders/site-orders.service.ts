@@ -16,17 +16,11 @@ export class SiteOrdersService {
     comment: true,
     commentOperator: true,
     orderId: true,
+    callbackAt: true,
     createdAt: true,
     updatedAt: true,
     city: { select: { id: true, name: true } },
   } as const;
-
-  private withCompatCallbackAt<T extends Record<string, unknown>>(siteOrder: T) {
-    return {
-      ...siteOrder,
-      callbackAt: null,
-    };
-  }
 
   async create(createSiteOrderDto: CreateSiteOrderDto) {
     const created = await this.prisma.siteOrder.create({
@@ -35,7 +29,7 @@ export class SiteOrdersService {
       // status по умолчанию "Новый" (из базы)
     });
 
-    return this.withCompatCallbackAt(created);
+    return created;
   }
 
   async findAll(query: QuerySiteOrdersDto) {
@@ -72,7 +66,7 @@ export class SiteOrdersService {
     ]);
 
     return {
-      data: data.map((item) => this.withCompatCallbackAt(item)),
+      data,
       pagination: {
         total,
         page,
@@ -92,22 +86,25 @@ export class SiteOrdersService {
       throw new NotFoundException(`Заявка с ID ${id} не найдена`);
     }
 
-    return this.withCompatCallbackAt(siteOrder);
+    return siteOrder;
   }
 
   async update(id: number, updateSiteOrderDto: UpdateSiteOrderDto) {
     // Проверяем существование
     await this.findOne(id);
 
-    const { callbackAt: _callbackAt, ...updateData } = updateSiteOrderDto;
-
     const updated = await this.prisma.siteOrder.update({
       where: { id },
-      data: updateData,
+      data: {
+        ...updateSiteOrderDto,
+        ...(updateSiteOrderDto.callbackAt !== undefined
+          ? { callbackAt: updateSiteOrderDto.callbackAt ? new Date(updateSiteOrderDto.callbackAt) : null }
+          : {}),
+      },
       select: this.siteOrderSelect,
     });
 
-    return this.withCompatCallbackAt(updated);
+    return updated;
   }
 
   async remove(id: number) {
@@ -119,7 +116,7 @@ export class SiteOrdersService {
       select: this.siteOrderSelect,
     });
 
-    return this.withCompatCallbackAt(deleted);
+    return deleted;
   }
 
   async updateStatus(id: number, status: string, callbackAt?: string) {
@@ -129,14 +126,14 @@ export class SiteOrdersService {
       where: { id },
       data: {
         status,
+        ...(callbackAt !== undefined
+          ? { callbackAt: callbackAt ? new Date(callbackAt) : null }
+          : {}),
       },
       select: this.siteOrderSelect,
     });
 
-    return {
-      ...this.withCompatCallbackAt(updated),
-      callbackAt: status === 'Перезвонить' && callbackAt ? callbackAt : null,
-    };
+    return updated;
   }
 
   async linkToOrder(id: number, orderId: number) {
@@ -152,6 +149,6 @@ export class SiteOrdersService {
       select: this.siteOrderSelect,
     });
 
-    return this.withCompatCallbackAt(updated);
+    return updated;
   }
 }

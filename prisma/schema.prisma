@@ -153,14 +153,9 @@ model Order {
   masterChange    Decimal?  @map("master_change") @db.Decimal(10, 2)
   prepayment      Decimal?  @db.Decimal(10, 2)
   callId          String?   @map("call_id") @db.VarChar(100)
-  description     String    @default("") @db.Text
-  source          String?   @db.VarChar(255)
-  siteOrderId     Int?      @map("site_order_id")
+  appealId        Int?      @map("appeal_id")
   dateCloseMod    DateTime? @map("date_close_mod")
   closingAt       DateTime? @map("closing_at")
-  qaStatus          String?   @map("qa_status") @db.VarChar(50)
-  qaAmountConfirmed Boolean?  @map("qa_amount_confirmed")
-  qaNote            String?   @map("qa_note") @db.Text
   version         Int       @default(1)
   hasPoverka      Boolean   @default(false) @map("has_poverka")
   createdAt       DateTime  @default(now()) @map("created_at")
@@ -173,6 +168,7 @@ model Order {
   status        OrderStatus    @relation(fields: [statusId], references: [id])
   operator      Operator       @relation(fields: [operatorId], references: [id])
   master        Master?        @relation(fields: [masterId], references: [id])
+  appeal        Appeal?        @relation("OrderAppealById", fields: [appealId], references: [id])
   comments      OrderComment[]
   documents     OrderDocument[]
   cashSubmission CashSubmission?
@@ -197,9 +193,7 @@ model Order {
   @@index([statusId, createdAt])
   @@index([cityId, masterId])
   @@index([cityId, operatorId])
-  @@index([source])
-  @@index([siteOrderId])
-  @@index([qaStatus])
+  @@index([appealId])
   @@schema("orders_service")
   @@map("orders")
 }
@@ -317,7 +311,39 @@ model SiteOrder {
   @@map("site_orders")
 }
 
-// Appeal model removed — merged into Order
+model Appeal {
+  id          Int       @id @default(autoincrement())
+  operatorId  Int       @map("operator_id")
+  cityId      Int       @map("city_id")
+  phone       String    @db.VarChar(20)
+  category    String    @db.VarChar(50)
+  description String?   @db.Text
+  result      String?   @db.Text
+  status      String    @default("new") @db.VarChar(50)
+  sourceType  String    @map("source_type") @db.VarChar(20)
+  callId      Int?      @map("call_id")
+  siteOrderId Int?      @map("site_order_id")
+  orderId     Int?      @map("order_id")
+  callbackAt  DateTime? @map("callback_at")
+  closedAt    DateTime? @map("closed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  linkedOrders Order[]  @relation("OrderAppealById")
+
+  @@index([operatorId])
+  @@index([phone])
+  @@index([status])
+  @@index([category])
+  @@index([callbackAt])
+  @@index([sourceType])
+  @@index([cityId, status])
+  @@index([operatorId, createdAt])
+  @@index([phone, createdAt])
+  @@index([status, callbackAt])
+  @@schema("calls_service")
+  @@map("appeals")
+}
 
 // ─────────────────────────────────────────
 // Schema: audit_logs
