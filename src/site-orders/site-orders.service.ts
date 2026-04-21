@@ -6,11 +6,36 @@ import { CreateSiteOrderDto, UpdateSiteOrderDto, QuerySiteOrdersDto } from './dt
 export class SiteOrdersService {
   constructor(private prisma: PrismaService) {}
 
+  private readonly siteOrderSelect = {
+    id: true,
+    cityId: true,
+    site: true,
+    clientName: true,
+    phone: true,
+    status: true,
+    comment: true,
+    commentOperator: true,
+    orderId: true,
+    createdAt: true,
+    updatedAt: true,
+    city: { select: { id: true, name: true } },
+  } as const;
+
+  private withCompatCallbackAt<T extends Record<string, unknown>>(siteOrder: T) {
+    return {
+      ...siteOrder,
+      callbackAt: null,
+    };
+  }
+
   async create(createSiteOrderDto: CreateSiteOrderDto) {
-    return this.prisma.siteOrder.create({
+    const created = await this.prisma.siteOrder.create({
       data: createSiteOrderDto,
+      select: this.siteOrderSelect,
       // status по умолчанию "Новый" (из базы)
     });
+
+    return this.withCompatCallbackAt(created);
   }
 
   async findAll(query: QuerySiteOrdersDto) {
@@ -41,13 +66,13 @@ export class SiteOrdersService {
         orderBy: { createdAt: 'desc' },
         skip,
         take: limit,
-        include: { city: { select: { id: true, name: true } } },
+        select: this.siteOrderSelect,
       }),
       this.prisma.siteOrder.count({ where }),
     ]);
 
     return {
-      data,
+      data: data.map((item) => this.withCompatCallbackAt(item)),
       pagination: {
         total,
         page,
@@ -60,57 +85,73 @@ export class SiteOrdersService {
   async findOne(id: number) {
     const siteOrder = await this.prisma.siteOrder.findUnique({
       where: { id },
-      include: { city: { select: { id: true, name: true } } },
+      select: this.siteOrderSelect,
     });
 
     if (!siteOrder) {
       throw new NotFoundException(`Заявка с ID ${id} не найдена`);
     }
 
-    return siteOrder;
+    return this.withCompatCallbackAt(siteOrder);
   }
 
   async update(id: number, updateSiteOrderDto: UpdateSiteOrderDto) {
     // Проверяем существование
     await this.findOne(id);
 
-    return this.prisma.siteOrder.update({
+    const { callbackAt: _callbackAt, ...updateData } = updateSiteOrderDto;
+
+    const updated = await this.prisma.siteOrder.update({
       where: { id },
-      data: updateSiteOrderDto,
+      data: updateData,
+      select: this.siteOrderSelect,
     });
+
+    return this.withCompatCallbackAt(updated);
   }
 
   async remove(id: number) {
     // Проверяем существование
     await this.findOne(id);
 
-    return this.prisma.siteOrder.delete({
+    const deleted = await this.prisma.siteOrder.delete({
       where: { id },
+      select: this.siteOrderSelect,
     });
+
+    return this.withCompatCallbackAt(deleted);
   }
 
   async updateStatus(id: number, status: string, callbackAt?: string) {
     await this.findOne(id);
 
-    return this.prisma.siteOrder.update({
+    const updated = await this.prisma.siteOrder.update({
       where: { id },
       data: {
         status,
-        callbackAt: status === 'Перезвонить' && callbackAt ? new Date(callbackAt) : null,
       },
+      select: this.siteOrderSelect,
     });
+
+    return {
+      ...this.withCompatCallbackAt(updated),
+      callbackAt: status === 'Перезвонить' && callbackAt ? callbackAt : null,
+    };
   }
 
   async linkToOrder(id: number, orderId: number) {
     // Проверяем существование заявки
     await this.findOne(id);
 
-    return this.prisma.siteOrder.update({
+    const updated = await this.prisma.siteOrder.update({
       where: { id },
       data: { 
         orderId,
         status: 'Заказ создан',
       },
+      select: this.siteOrderSelect,
     });
+
+    return this.withCompatCallbackAt(updated);
   }
 }
